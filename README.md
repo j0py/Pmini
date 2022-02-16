@@ -177,6 +177,24 @@ You may also speed up nested groups of course!
 
 ```"123,34"``` The "," (down) character goes the opposite way.
 
+```"123-4"``` When playing synthdef, step 3 pitch glides to step 4 pitch. For this, a PmonoArtic is used. When a glide is requested, \legato >= 1 is generated, and if your synthdef supports it, a glissando may then happen:
+
+```
+SynthDef(\sin, { |out=0, freq=440, gate=1, sustain=1, attack=0.01, amp=0.1, pan=0, rel=1|
+	var env, sig;
+
+	sig = SinOsc.ar(VarLag.kr(freq, sustain, -4));
+
+	env = Env.asr(attack, 1, rel).kr(2, gate);
+
+	sig = sig * env;
+
+	Out.ar(out, Pan2.ar(sig, pan, 0.2 * amp));
+}).add;
+```
+
+The VarLag on freq does the job.
+
 ## Installation
 
 Just put ```pmini.sc``` in the Extensions folder of your SuperCollider installation.
