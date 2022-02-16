@@ -9,8 +9,8 @@ Inspirated by ddwChucklib quark by James Harkins and Tidal.
 
 ```Pmini(<numbers>)```
 
-bpb: beats per bar (optional, default: 4)
-sound: name of a synthdef or sample (optional)
+bpb: beats per bar (optional, default: 4)   
+sound: name of a synthdef or sample (optional)   
 numbers: what notes or samples to play
 
 If you omit an argument, the remaining arguments "shift to the left".
