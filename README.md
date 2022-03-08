@@ -96,7 +96,7 @@ A character in a spec may be:
 x : a rest (the sound of the note before x will stop)  
 a space : the duration of the space will be added to the sustain of the previous note, and so the previous note continues to play during this "space".  
 
-There are more different characters to be found in the specs, which can modify the preceding, or following, "real" number. These will be explained below.
+There are more different characters to be found in the specs, which can modify the preceding, or following, "real" number. These will be explained further below.
 
 # Instrument
 
@@ -112,6 +112,9 @@ In all other cases, a number is generated, used to specify \degree (when playing
 
 Mostly a float between 0 and 1. Here we divide integers 0 to 8 by 8, resulting in floats 0.0, 0.125, 0.25, 0.375, 0.5, .., 1.0, which gives us enough amplitude options. If you omit A, then Pmini will not generate \amp.
 
+This could be improved by mapping exponentially instead of linear, and still have 0 be really 0.  
+Maybe ```amp = max(0, digit.linexp(0, 8, 0.001, 1.0) - 0.002)```
+
 # Pan
 
 Mostly a float from -1.0 to 1.0. Here we divide integers 0 to 8 by 4 and subtract 1.0, resulting in -1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75 and 1.0. So number 4 will be the center. If you omit P, then Pmini will not generate \pan.
@@ -122,9 +125,9 @@ You can. If you do not use _any_ capital letter in the "numbers" argurment for P
 
 Still, it could then also supply a \dur key, and so the "sound" argument is used, in this case, to specify what you want generated:
 
-"dd" : generate ```[\dur, \degree (or \bufnum)]``` for each event
-"d" : generate \dur for each event
-"" : generate \degree (or \bufnum) for each event
+"dd" : generate ```[\dur, \degree (or \bufnum)]``` for each event  
+"d" : generate \dur for each event  
+"" : generate \degree (or \bufnum) for each event  
 
 So you could:
 ```
@@ -158,8 +161,8 @@ You may nest these things as deep as you want.
 
 ### Speed
 
-```*``` ```"123*24"``` plays note "3" 2 times faster during it's duration.
-```/``` ```"123/24"``` plays note "3" 2 times slower during it's duration.
+```"123*24"``` plays note "3" 2 times faster during it's duration.   
+```"123/24"``` plays note "3" 2 times slower during it's duration.  
 
 ```"123*3/24"``` plays note "3" 1.5 times faster during it's duration.
 
@@ -187,13 +190,9 @@ The (gated) synthdef needs to support this by having a Lag or VarLag on the freq
 ```
 SynthDef(\sin, { |out=0, freq=440, gate=1, sustain=1, attack=0.01, amp=0.1, pan=0, rel=1|
 	var env, sig;
-
 	sig = SinOsc.ar(VarLag.kr(freq, sustain, -4));
-
 	env = Env.asr(attack, 1, rel).kr(2, gate);
-
 	sig = sig * env;
-
 	Out.ar(out, Pan2.ar(sig, pan, 0.2 * amp));
 }).add;
 ```
@@ -214,13 +213,11 @@ SynthDef(\sin, { |out=0, freq=440, gate=1, sustain=1, attack=0.01, amp=0.1, pan=
 
 Just put ```pmini.sc``` in the Extensions folder of your SuperCollider installation.
 
-I will figure out how to put this inside a Quark.
-
 ## Plans
 
 ```"(123)"``` could play 3 notes simultaneously (a chord) + modifier for strum.
 
-setup a drumkit (useable characters: #^-_=:;,.\):
+setup a drumkit (useable characters: ```#^-_=:;,.\```):
 
 ```Pmini.kit = [$_, "bd", 1, $=, "sn", 2, $^, "hh", 3,.. etc]```
 
