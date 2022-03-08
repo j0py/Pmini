@@ -23,7 +23,7 @@ You can supply a number for the beats-per-bar that Pmini will use. Default 4.
 
 You can supply the sound to play, as a string. Optional. When omitted, Pmini assumes you want to play the \default synth.
 
-If you supply a "sound", then Pmini will check if there is a sample by that name. If there is, then Pmini will generate a Pbind with a \bufnum key. This Pbind iwill need a sample playing synthdef name (for the \instrument key), and you can specify that name via the class variable Pmini.playbuf_synthdef, which defaults to "playbuf".
+If you supply a "sound", then Pmini will check if there is a sample by that name. If there is, then Pmini will generate a Pbind with a \bufnum key. This Pbind will need a sample playing synthdef name (for the \instrument key), and you can specify that name via the class variable Pmini.playbuf_synthdef, which defaults to "playbuf".
 
 Samples are expected in ```Library.at(\samples)```.
 
@@ -48,24 +48,23 @@ This would read ALL files (.wav, .aiff, etc) as samples into the library.
 
 Each sub-folder of the "samples" folder will appear in the Library under the \samples key, and it will hold an Array with audio Buffers read from the files that were found in the sub-folder.
 
-If a sample by the name of the given "sound" is not found, then Pmini assumes there is a Synthdef by that name, and will generate a PmonoArtic playing that synthdef.
-
-The reason why in this case a PmonoArtic is generated is to have the option to have a note sustain into the next note with gliding pitch. Further in this readme the "glide" syntax details this further.
+If a sample by the name of the given "sound" is not found, then Pmini assumes there is a Synthdef by that name, and will generate a Pbind playing that synthdef.
 
 # Numbers
 
-The ```<numbers>``` can supply 5 Pbind-keys (at the moment):
+The ```<numbers>``` can supply 6 Pbind-keys (at the moment):
 - \dur
 - \instrument
 - \degree or \bufnum (N)
 - \amp (A)
 - \pan (P)
+- \octave (O)
 
 For each key you supply a capital letter, followed by the "spec".   
 
-```"N 1234 A 123 P 08"```
+```"N 1234 A 123 P 08 O 5"```
 
-As you can imagine, this could be extended with more capital letters, like "O" for the \octave key, as long as a single digit ranging from 0 to 9 is enough to specify the Pbind key.
+As you can imagine, this could be extended with more capital letters, as long as a single digit ranging from 0 to 9 is enough to specify the value for the Pbind key.
 
 # Dur
 
@@ -81,6 +80,7 @@ Each part N, A or P is capable of delivering the \dur key, and so the following 
 
 In this example, the P part delivers \dur (which will be 2, because the P part divides the bar into 2 steps). The numbers from the other specs will flow through these durations:
 
+```
 N A P
 1 1 0
 2 2 8
@@ -88,12 +88,13 @@ N A P
 4 1 8
 1 2 0
 ..etc
+```
 
 A character in a spec may be:
 
-0123456789 : a bufnum or degree (when playing a sample or synthdef)
-x : a rest (the sound of the note before x will stop)
-a space : the duration of the space will be added to the sustain of the previous note, and so the previous note continues to play during this "space".
+0123456789 : a bufnum or degree (when playing a sample or synthdef)  
+x : a rest (the sound of the note before x will stop)  
+a space : the duration of the space will be added to the sustain of the previous note, and so the previous note continues to play during this "space".  
 
 There are more different characters to be found in the specs, which can modify the preceding, or following, "real" number. These will be explained below.
 
