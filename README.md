@@ -93,9 +93,9 @@ A character in a spec may be:
 
 0123456789 : a bufnum or degree (when playing a sample or synthdef)
 x : a rest (the sound of the note before x will stop)
-a space : the duration of the space will be added to the duration of the previous note, and so the previous note continues to play during this "space".
+a space : the duration of the space will be added to the sustain of the previous note, and so the previous note continues to play during this "space".
 
-There are more different characters to be found in the specs, which can modify the preceding "real" number. These will be explained below.
+There are more different characters to be found in the specs, which can modify the preceding, or following, "real" number. These will be explained below.
 
 # Instrument
 
@@ -115,11 +115,11 @@ Mostly a float between 0 and 1. Here we divide integers 0 to 8 by 8, resulting i
 
 Mostly a float from -1.0 to 1.0. Here we divide integers 0 to 8 by 4 and subtract 1.0, resulting in -1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75 and 1.0. So number 4 will be the center. If you omit P, then Pmini will not generate \pan.
 
-# Generate just a pattern, not an eventpattern
+# Can i generate just a pattern, not an eventpattern
 
 You can. If you do not use _any_ capital letter in the "numbers" argurment for Pmini, then it assumes that the "numbers" argument is only one "spec", and it will generate a Pseq pattern for the supplied numbers.
 
-Still, it could also supply a \dur key, and so the "sound" argument is used, in this case, to specify what you want generated:
+Still, it could then also supply a \dur key, and so the "sound" argument is used, in this case, to specify what you want generated:
 
 "dd" : generate ```[\dur, \degree (or \bufnum)]``` for each event
 "d" : generate \dur for each event
@@ -157,27 +157,31 @@ You may nest these things as deep as you want.
 
 ### Speed
 
-```*``` ```"123*1.5|4"``` plays note "3" 1.5 times faster during it's duration.
+```*``` ```"123*24"``` plays note "3" 2 times faster during it's duration.
+```/``` ```"123/24"``` plays note "3" 2 times slower during it's duration.
+
+```"123*3/24"``` plays note "3" 1.5 times faster during it's duration.
 
 This is a bit tricky: during the step, 1.5 notes "3" are played.   
-That means, in cycle 0, a "3" is played at the beginning of the step, and another is played at 2/3 of the step.
-In cycle 1, the step will start with silence, and on 1/3 of the step, a "3" will be played. This last "3" will exactly fill up the step. Cycle 2 will be the same as cycle 0, cycle 3 the same as cycle 1, etc.   
+That means, in cycle 0, a "3" is played at the beginning of the step, and another is played at 2/3 into the step.
+In cycle 1, the step will start with silence, and on 1/3 into the step, a "3" will be played. This last "3" will exactly fill up the step. Cycle 2 will be the same as cycle 0, cycle 3 the same as cycle 1, etc.   
 
-The "|" vertical bar is necessary here to mark the end of the modifier, so that the parser will know that "4" is the next step.
+After the ```*``` and ```/``` exactly 1 digit (2..9) is expected.
 
-```/``` ```"123/1.5|4"``` like above, but plays "3" 1.5 times slower.
-
-I am still wondering if i should make that a modifier always has exactly 1 number, so that the "|" becomes unnecessary. "*1.5|" Equals "*3/2", which takes one character less space, but needs more mental power from the player. 
-
-You may also speed up nested groups of course!
+You may also speed up nested groups of course:
 
 ```"12[345]*5/7|4"```
 
-```"123'34"``` The "'" (up) character will play a sample faster (generates \rate key for the playbuf synthdef). And for synthdef playing will play 3 octaves up (but i think this will change).
+### Up/Down
+
+```"123'34"``` The "'" (up) character will play a sample faster (generates \rate key for the playbuf synthdef). And for synthdef playing will play 3 semitones up (by adding 3 * 0.1 to the \degree key in the Pbind).
 
 ```"123,34"``` The "," (down) character goes the opposite way.
 
-```"123-4"``` When playing synthdef, step 3 pitch glides to step 4 pitch. For this, a PmonoArtic is used. When a glide is requested, \legato >= 1 is generated, and if your synthdef supports it, a glissando may then happen:
+```"123~4"``` When playing synthdef, step 3 pitch glides to step 4 pitch.
+This is done by adding the \dur of step 4 to the \sustain of step 3 and generate an event with type \set in step 4, supplying the new degree to glide to.
+
+The (gated) synthdef needs to support this by having a Lag or VarLag on the frequency control. The duration for the Lag is the \sustain key. The event with type \set in step 4 will also deliver a \sustain key with the same value as its \dur.
 
 ```
 SynthDef(\sin, { |out=0, freq=440, gate=1, sustain=1, attack=0.01, amp=0.1, pan=0, rel=1|
@@ -193,7 +197,17 @@ SynthDef(\sin, { |out=0, freq=440, gate=1, sustain=1, attack=0.01, amp=0.1, pan=
 }).add;
 ```
 
-The VarLag on freq does the job.
+### Repeat
+
+```!``` Repeats the previous step. Expects 1 digit (2..9) after the ! character.
+
+```"1!4"``` is the same as ```"1111"```.
+
+### Randomness
+
+```%``` a random digit 0..9, use everywhere, evaluated once during parsing
+
+```?``` a random digit 0..9, use everywhere, evaluated just in time all the time
 
 ## Installation
 
@@ -201,7 +215,20 @@ Just put ```pmini.sc``` in the Extensions folder of your SuperCollider installat
 
 I will figure out how to put this inside a Quark.
 
-## Things to do
+## Plans
 
-```"123!54"``` repeat step "3" 5 times, so this spec will then have 8 steps.
+```"(123)"``` could play 3 notes simultaneously (a chord) + modifier for strum.
+
+setup a drumkit (useable characters: #^-_=:;,.\):
+
+```Pmini.kit = [$_, "bd", 1, $=, "sn", 2, $^, "hh", 3,.. etc]```
+
+So, ```_``` will be sample number 1 from the "bd" samples, etc.
+
+and then in a "K" part, you specify the drums using your own definition:
+
+Pmini("K _ <=[^^]>(_^) A 2") if "K" is used, then sound arg is ignored
+
+Could be fun..
+
 
