@@ -1,7 +1,7 @@
 # Pmini
 Compact eventpattern generator for SuperCollider
 
-Inspirated by ddwChucklib quark by James Harkins and Tidal.
+Inspired by ddwChucklib quark by James Harkins and Tidal.
 
 ```Pmini(<sound>, <specs>)```
 
