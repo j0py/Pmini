@@ -1,94 +1,73 @@
 /*******************************************************************
 
-create a tree from a spec (a string), which can then be traversed
+20220423
 
-node types for the tree (and the list too):
-- nested : contains one or more children, who share time
-- turns  : contains one or more children, taking turns, one per cycle
-- note   : plays a note (\degree, \dur, \type)
-- rest   : plays a rest (\dur, \type)
-- space  : adds sustain (time) to previous node, by increasing its \dur
-- root   : is essentially a nested node, traversal start point
+create trees from a spec (a string)
 
-spec: " 1x<6[78]>4"
+each tree can then be traversed to generate keys for an event
+each tree is capable of generating \dur, but only one will
 
-tree: root - space
-- note (1)
-- rest
-- turns  - note (6)
-- nested - note (7)
-- note (8)
-- note (4)
+N number       \type \dur \sustain \degree \bufnum
+A amplitude    \type \dur \amp
+V amplitude    \type \dur \amp
+O octave       \type \dur \octave
+P pan          \type \dur \pan
 
-traverse the tree, per cycle (total dur = 1) number (number/dur):
-0 : space(/.2), note(1/.2), rest(/.2), note(6/.2), note(4/.2)
-1 : space(/.2), note(1/.2), rest(/.2), note(7/.1), note(8/.1), note(4/.2)
-2 : space(/.2), note(1/.2), rest(/.2), note(6/.2), note(4/.2)
-3 : space(/.2), note(1/.2), rest(/.2), note(7/.1), note(8/.1), note(4/.2)
-etc
+example: Pmini(\sound, "N1234A5O4P08")
+returns:
 
-each cycle, you can traverse the tree, and add the nodes to the end of a list.
+Pbind(
+  \instrument, \sound,   // \sound does not exists as a sample
+  \instrument, \playbuf, // if \sound exists as a sample
+  \bufnum, (calculated), // if \sound exists as a sample
+  \dur, 1,               // if beatsPerBar = 4
+  \degree, Pseq([1,2,3,4], inf),
+  \amp, 5,
+  \octave, 4,
+  \pan, Pseq([-1, 1], inf),
+  );
 
-algoritm when you have to generate the next event:
+each tree is created from its own spec string. spec syntax:
 
-0. while list is empty, cycle++ and traverse tree to add nodes to the list
-1. take node N from the start of the list
-2. if N == space then play a \rest -> done
-3. do forever
-if list is empty, cycle++ and traverse tree to add nodes to the list
-if space node at start of list: take it out (M) and add it's \dur to N
-else break from do forever
-4. N == rest ? play a \rest -> done
-5. N == note ? play a \note -> done
-6. error
+0 .. z  integer value 0 .. 35
+%       random number 1 .. 9 generated once at interpretation time
+?       random number 1 .. 9 generated new for each event
+-       plays a rest
+~       glides previous step to a new value
+<space> adds sustain to previous step
 
-this algorithm can be implemented inside a Pn/Plazy construct
+*n plays step n times faster within the step duration
+/n plays step n times slower within the step duration
+!n repeats a step n times
+'n adds n * 0.1 to degree, or speeds up sample playback rate by n
+,n substract n * 0.1 to degree, or slows down sample playback rate by n
 
-more ideas:
------------
-TEST samples: ', + 1 digit (0..9) rate = rate * / digit.midiratio
-TEST synthdef: ',  sharp/flat (degree +/- 0.1) --> degree should be float!
+<..>    plays enclosed steps one by one
+[..]    plays enclosed steps within this step (faster)
+{..}    plays one of the enclosed steps randomly
+(..)n   plays enclosed steps together, strum: 0..b neg, c none, d..o pos
 
-TEST * and / always expect 1 digit (*2/3 == /1.5)
-TEST (then putting a "|" after to end the step is not needed anymore)
-
-TEST "O" octave spec, default octave = 5
-
-TEST implement !, + 1 digit (2..9) to "repeat" a step
-
-TEST randomness
-TEST % = random digit 0..9, use everywhere, evaluated once during parse
-TEST ? = random digit 0..9, use everywhere, evaluated just in time all the time
-
-TEST alternative to glide not using pmonoartic because of a bug in pmonoartic
-
-(123) play 3 synths together (degree = #[1,2,3])
-or play a chord (135) where the 1st digit = degree, and others relative degree
-any of the digits may be random.. and all other modifiers apply too
-or play 3 samples together (maybe amp should be lowered?) hmm..
-or strum!
-
-setup: Pmini.kit = [$_, "bd", 1, $=, "sn", 2, $^, "hh", 3,.. etc]
-characters useable in "K" spec: #^*-_=':;,.\
-Pmini("K _'<^[^^]>(_') A 2") if "K" is used, then sound arg is ignored
+strum not yet implemented
+idea: use "|" to end the stream by returning nil in the next event
+idea: use "!0" (repeat 0 times) to disable a step, !1 to enable again
+idea: "K" = drumkit
+  Pmini.kit = [$_, "bd", 1, $=, "sn", 2, $^, "hh", 3,.. etc]
+  characters useable in "K" spec: #^*-_=':;,.\
+  Pmini("K_'<^[^^]>(_')V8") if "K" is used, then sound arg is ignored
 
 ******************************************************************/
 
 Pmini {
-	classvar playbuf_synthdef=\playbuf, playbuf1_synthdef=\playbuf1;
+	classvar playbuf_synthdef=\playbuf;
 
-	// A "cycle" (1 traversal of the tree) equals 1 bar and has bpb beats
-	var <bpb = 4;
+	*new { |sound="", spec=""| ^super.new.init(sound, spec); }
 
-	*new { |in_bpb, sound="", spec=""| ^super.new.init(in_bpb, sound, spec); }
-
-	init { |in_bpb, sound, spec|
+	init { |sound, spec|
 		// the optional arguments start from the left side here
-		if(spec.asString.size <= 0, { spec = sound; sound=in_bpb; in_bpb=4; });
-		if(spec.asString.size <= 0, { spec = sound; sound=""; });
-		bpb = in_bpb.asFloat;
+		if(spec.asString.size <= 0, { spec = sound; sound="default"; });
 
-		if(spec.toLower != spec, { ^this.return_pbind(sound, spec) });
+		// if spec contains uppercase letters, then return a Pbind
+		if(spec.toLower != spec, { ^this.return_pbind(sound.asSymbol, spec) });
 
 		^this.return_pattern(sound, spec);
 	}
@@ -96,138 +75,146 @@ Pmini {
 	return_pattern { |sound, spec|
 		var root = PMRoot(spec);
 
-		root.post;
-
 		case
 
 		// [\dur, \degree]
 		{ sound == "dd" } { ^Pn(Plazy({
-			var event = root.next_event(bpb);
-
-			Pseq([event.dur, event.degree], 1)
+			var event = root.next;
+			Pseq([event.dur, event.intval], 1)
 		}));
 		}
 
 		// \dur
-		{ sound == "d" } { ^Pn(Plazy({ root.next_event(bpb).dur })) }
+		{ sound == "d" } { ^Pn(Plazy({ root.next.dur })) }
 
 		// \degree
-		{	^Pn(Plazy({ root.next_event(bpb).degree })) }
+		{	^Pn(Plazy({ root.next.intval })) }
 	}
 
 	return_pbind { |sound, spec|
-		var part, parts, durations_part, pb, mid;
+		var part, parts, dur_part, pb;
 
 		// split spec in parts and determine which one defines the durations.
-		// each uppercase char is surrounded by 2 spaces.
-		// add one extra space at the end, because then you can just
-		// remove the first and last space char of every part after parsing.
-		spec = spec ++ " ";
-
+		// defaults to first part, overridden by last part with a "+" in its spec
+		//
 		parts = Dictionary.new;
 		spec.asString.do { |ch|
 			case
 			{ ch.isAlpha.and(ch.isUpper) } { part = ch.toLower.asSymbol }
 			{ part.isNil } { } // wait for the first uppercase char
-			{ ch == $+ } { durations_part = part }
+			{ ch == $+ } { dur_part = part }
 			{ parts.put(part, parts.atFail(part, "") ++ ch.asString); };
-			if(durations_part.isNil.and(part.notNil), { durations_part = part; });
+
+			if(dur_part.isNil.and(part.notNil), { dur_part = part; });
 		};
 
-		parts = parts.collect { |spec| spec.rotate(1).copyToEnd(2) };
-		sound = sound.asSymbol;
+		// parse each part, resulting in a PMRoot object (a tree)
+		parts = parts.collect { |spec| PMRoot(spec) };
 
-		if(Library.at(\samples, sound).notNil, {
-			pb = Pbind.new(
-				\instrument, playbuf_synthdef,
-				\playing, \sample,
-			);
-			parts = parts.collect { |spec| PMRoot(spec, \sample) };
-		}, {
-			pb = Pbind.new(
-				\instrument, sound,
-				\playing, \synth,
-			);
-			parts = parts.collect { |spec| PMRoot(spec, \synth) };
-		});
-
-		//if(parts.includesKey(\n), { parts.at(\n).post });
-
-		pb.patternpairs_(pb.patternpairs ++ [
+		pb = Pbind(
 			\dur, Pfunc({ |ev|
-				var degree, dur, sustain;
-				var events = parts.collect { |parser| parser.next_event(bpb) };
+				var dur, sustain, mid, samples, rest=false, up=0, down=0, degree=0;
 
-				//events.at(\n).post;
+				// let each PMRoot create its next PMEvent object
+				var events = parts.collect { |root| root.next };
 
-				dur = events.at(durations_part).dur.asFloat;
-				sustain = events.at(durations_part).sustain.asFloat;
+				dur = events.at(dur_part).dur.asFloat;
+				sustain = events.at(dur_part).sustain.asFloat;
 
-				degree = events.at(\n).degree.asInteger;
-				events.do { |event| if(event.type == \rest, { degree = \rest }) };
-				ev.put(\degree, degree);
+				if(events.includesKey(\n), {
+					degree = events.at(\n).intval;
+					up = events.at(\n).intup;
+					down = events.at(\n).intdown;
+				});
 
-				if(degree.isInteger, {
+				events.do { |event| if(event.type == \rest, { rest = true }) };
 
-					if(ev[\playing] == \sample, {
-						ev.put(\bufnum, Library.at(\samples, sound).wrapAt(degree).bufnum);
-						ev.put(\rate, (events.at(\n).up - events.at(\n).down).midiratio);
-					});
+				if(rest, {
+					ev.put(\degree, \rest);
+				}, {
+					var amp;
 
-					if(ev[\playing] == \synth, {
+					if((samples = Library.at(\samples, sound)).notNil, {
+						ev.put(\instrument, playbuf_synthdef);
+						ev.put(\bufnum, samples.wrapAt(degree).bufnum);
+						ev.put(\rate, (up - down).midiratio);
+					}, {
+						ev.put(\instrument, sound);
+						ev.put(\degree, (up - down) * 0.1 + degree);
 
-						if(events.at(\n).type == \note, {
-							ev.put(\callback, { |ev2| mid = ev2.id.at(0) });
-							ev.put(\sustain, sustain);
+						// glide mechanism
+						if(events.includesKey(\n), {
+							if(events.at(\n).type == \note, {
+								// setup callback which stores the id of the synth in 'mid'
+								ev.put(\callback, { |ev2|
+									if(ev2.id.class == Array.class, {
+										mid = ev2.id.at(0);
+									}, {
+										mid = ev2.id.asInteger;
+									});
+								});
+								ev.put(\sustain, sustain);
+							});
+
+							if(events.at(\n).type == \set, {
+								ev.put(\type, \set);
+								ev.put(\id, mid);
+								ev.put(\sustain, (dur * 0.5));
+							});
 						});
 
-						if(events.at(\n).type == \set, {
-							ev.put(\type, \set);
-							ev.put(\id, mid );
-							ev.put(\sustain, (dur * 0.5)); // use this for freq varlag
+						// \octave
+						if(events.includesKey(\o), {
+							ev.put(\octave, events.at(\o).intval.clip(2,8));
 						});
-
-						// sharp/flat
-						ev.put(
-							\degree,
-							(events.at(\n).up - events.at(\n).down) * 0.1 + degree
-						);
 					});
 
-					if(events.includesKey(\o), {
-						ev.put(\octave, events.at(\o).degree.asInteger.clip(2,8));
-					});
-
+					// \amp
 					if(events.includesKey(\a), {
-						// could use \db key here, 0db = 1, 20db = (-20)db etc
-						ev.put(\amp, events.at(\a).degree.asInteger.clip(0,8) / 8);
+						if(events.includesKey(\v), {
+							ev.put(
+								\amp,
+								max(0, (events.at(\v).intval.clip(0,8) - 9 * 6).dbamp - 0.002) *
+								max(0, (events.at(\a).intval.clip(0,8) - 9 * 6).dbamp - 0.002)
+							);
+						}, {
+							ev.put(
+								\amp,
+								max(0, (events.at(\a).intval.clip(0,8) - 9 * 6).dbamp - 0.002)
+							);
+						});
+					}, {
+						if(events.includesKey(\v), {
+							ev.put(
+								\amp,
+								max(0, (events.at(\v).intval.clip(0,8) - 9 * 6).dbamp - 0.002)
+							);
+						});
 					});
 
+					// \pan
 					if(events.includesKey(\p), {
-						ev.put(\pan, events.at(\p).degree.asInteger.clip(0,8) / 4 - 1);
+						ev.put(\pan, events.at(\p).intval.clip(0,8) / 4 - 1);
 					});
 				});
 
 				dur
 			})
-		]);
+		);
 
 		^pb;
 	}
 }
 
 PMRoot : PMNested {
-	var index = 0, str, cycle, events, playing;
+	var index = 0, str, cycle, events;
 
-	*new { |spec, in_playing = \synth|
-		^super.new.init(spec.asString, in_playing);
-	}
+	*new { |spec| ^super.new.init(spec.asString) }
 
-	init { |spec, in_playing|
+	init { |spec|
 		str = spec;
 		cycle = -1;
 		events = List.new;
-		playing = in_playing; // \sample or \synth, makes a difference for parser
 		^this.parse(this);
 	}
 
@@ -242,7 +229,7 @@ PMRoot : PMNested {
 			if(ch == $%, { ch = "123456789".at(9.rand) });
 
 			case
-			{ ch == $x } {
+			{ ch == $- } {
 				node = PMRest.new;
 				currentNode.addChild(node);
 				parsing = \value;
@@ -259,6 +246,13 @@ PMRoot : PMNested {
 				parsing = \value;
 			}
 			{ ch == $> } { ^this }
+			{ ch == ${ } {
+				node = PMRandom.new;
+				this.parse(node);
+				currentNode.addChild(node);
+				parsing = \value;
+			}
+			{ ch == $} } { ^this }
 			{ ch == $[ } {
 				node = PMNested.new;
 				this.parse(node);
@@ -270,19 +264,18 @@ PMRoot : PMNested {
 			{ ch == $* } { parsing = \faster }
 			{ ch == $/ } { parsing = \slower }
 			{ ch == $! } { parsing = \repeat }
-			{ ch == $' } {
-				if(playing == \sample, { parsing = \up }, {
-					if(node.notNil, { node.up_(1) });
-					parsing = \value;
-				});
+			{ ch == $' } { parsing = \up }
+			{ ch == $, } { parsing = \down }
+			{ ch == $( } {
+				node = PMChord.new;
+				currentNode.addChild(node);
+				parsing = \chord;
 			}
-			{ ch == $, } {
-				if(playing == \sample, { parsing = \down }, {
-					if(node.notNil, { node.down_(1) });
-					parsing = \value;
-				});
-			}
+			{ ch == $) } { parsing = \value }
 
+			{ parsing == \chord } {
+				currentNode.children.last.add_value(ch);
+			}
 			{ parsing == \value } {
 				// start new node and parse the value (a 1 digit number, or '?')
 				node = PMNote.new;
@@ -297,32 +290,24 @@ PMRoot : PMNested {
 				parsing = \value;
 			}
 			{ parsing == \faster } {
-				if(node.notNil.and("23456789?".contains(ch)), {
-					node.faster_(ch);
-				});
+				if(node.notNil, { node.faster_(ch) });
 				parsing = \value;
 			}
 			{ parsing == \slower } {
-				if(node.notNil.and("23456789?".contains(ch)), {
-					node.slower_(ch);
-				});
+				if(node.notNil, { node.slower_(ch) });
 				parsing = \value;
 			}
 			{ parsing == \up } {
-				if(node.notNil.and("123456789?".contains(ch)), {
-					node.up_(ch);
-				});
+				if(node.notNil, { node.up_(ch) });
 				parsing = \value;
 			}
 			{ parsing == \down } {
-				if(node.notNil.and("123456789?".contains(ch)), {
-					node.down_(ch);
-				});
+				if(node.notNil, { node.down_(ch) });
 				parsing = \value;
 			}
 			{ parsing == \repeat } {
-				if(node.notNil.and("23456789".contains(ch)), {
-					(ch.asString.asInteger -1).do {
+				if(node.notNil, {
+					(max(1, ch.digit) - 1).do {
 						node = currentNode.addChild(node.clone);
 					};
 				});
@@ -334,14 +319,12 @@ PMRoot : PMNested {
 		^this; // you are the root node of the tree, so return yourself
 	}
 
-	next_event { | bpb |
+	next {
 		var event, index, type, sustain;
 
-		if(events.size < 1, { this.make_more_events(bpb); });
+		if(events.size < 1, { this.make_more_events(); });
 
 		event = events.removeAt(0);
-
-		//("next_event(" + event.type + ")").postln;
 
 		if(event.type == \space, { event.type_(\rest); ^event });
 		if(event.type == \glide, { event.type_(\set); ^event });
@@ -350,15 +333,15 @@ PMRoot : PMNested {
 		// we have a \note here
 
 		// make_more_events until you encounter the next \note or \rest
-		// and calculate \sustain for the current \note by summing the \dur
-		// values of all the \space and \glide events up until the next \note.
-
-		// after calculating this \sustain, then you can return the current
-		// \note or \rest event to be played.
+		// and calculate \sustain for the current \note by summing the
+		// \dur values of all the \space and \glide events up until the
+		// next \note.
+		// after calculating this \sustain, then you can return the
+		// current \note or \rest event to be played.
 
 		sustain = event.dur * 0.8;
 
-		if(events.size < 1, { this.make_more_events(bpb) });
+		if(events.size < 1, { this.make_more_events() });
 
 		index = 0;
 		type = events.at(index).type;
@@ -368,7 +351,7 @@ PMRoot : PMNested {
 			//["--", index, type, events.at(index).dur, sustain].postln;
 			sustain = sustain + events.at(index).dur;
 			index = index + 1;
-			if(events.size <= index, { this.make_more_events(bpb) });
+			if(events.size <= index, { this.make_more_events() });
 			type = events.at(index).type;
 		};
 
@@ -377,32 +360,61 @@ PMRoot : PMNested {
 		^event;
 	}
 
-	make_more_events { | bpb |
+	make_more_events {
+		var dur = 4;
+
+		if(thisThread.clock.class == TempoClock.class, {
+			dur = thisThread.clock.beatsPerBar;
+		});
+
 		cycle = cycle + 1;
-		events.addAll(super.get_events(cycle, bpb));
+
+		events.addAll(super.get_events(cycle, dur));
 	}
 }
 
 PMNote : PMNode {
-	do_traverse { |cycle, dur|
-		^List.newFrom([	PMEvent.newFromPMNode(this, \note, this.alter(dur), value) ]);
+	traverse { |cycle, dur|
+		^List.newFrom([
+			PMEvent.newFromPMNode(this, \note, this.alter(dur), value)
+		]);
+	}
+}
+
+PMChord : PMNode {
+	traverse { |cycle, dur|
+		^List.newFrom([
+			PMEvent.newFromPMNode(this, \note, this.alter(dur), value)
+		]);
+	}
+
+	add_value { |ch|
+		if(value.isArray, {
+			value = value.add(ch);
+		}, {
+			value = [ch];
+		});
 	}
 }
 
 PMRest : PMNode {
-	do_traverse { |cycle, dur|
-		^List.newFrom([ PMEvent.newFromPMNode(this, \rest, this.alter(dur))] );
+	traverse { |cycle, dur|
+		^List.newFrom([
+			PMEvent.newFromPMNode(this, \rest, this.alter(dur))
+		]);
 	}
 }
 
 PMSpace : PMNode {
-	do_traverse { |cycle, dur|
-		^List.newFrom([ PMEvent.newFromPMNode(this, \space, this.alter(dur))] );
+	traverse { |cycle, dur|
+		^List.newFrom([
+			PMEvent.newFromPMNode(this, \space, this.alter(dur))
+		]);
 	}
 }
 
 PMGlide : PMNode {
-	do_traverse { |cycle, dur|
+	traverse { |cycle, dur|
 		^List.newFrom([
 			PMEvent.newFromPMNode(this, \glide, this.alter(dur), value)
 		]);
@@ -410,31 +422,26 @@ PMGlide : PMNode {
 }
 
 PMNested : PMNode {
-	do_traverse { |cycle, dur|
+	traverse { |cycle, dur|
 		var d, result = List.new;
 
 		d = this.alter(dur) / children.size;
 		children.do { |node| result.addAll(node.get_events(cycle, d)) }
 		^result;
 	}
-
-	clone {
-		var clone = super.clone;
-		children.do { |child| clone.addChild(child.clone) };
-		^clone;
-	}
 }
 
 PMTurns : PMNode {
-	do_traverse { |cycle, dur|
+	traverse { |cycle, dur|
 		var node = children.wrapAt(cycle);
 		^List.newFrom(node.get_events(cycle, this.alter(dur)));
 	}
+}
 
-	clone {
-		var clone = super.clone;
-		children.do { |child| clone.addChild(child.clone) };
-		^clone;
+PMRandom : PMNode {
+	traverse { |cycle, dur|
+		var node = children.choose;
+		^List.newFrom(node.get_events(cycle, this.alter(dur)));
 	}
 }
 
@@ -459,6 +466,8 @@ PMNode {
 		clone.slower_(slower);
 		clone.up_(up);
 		clone.down_(down);
+
+		children.do { |child| clone.addChild(child.clone) };
 
 		^clone;
 	}
@@ -509,8 +518,9 @@ PMNode {
 						if(duration < 0.0001, { duration = 0; });
 					});
 				}, {
-					remaining_events.addAll(this.do_traverse(cycle, dur));
-					if(remaining_events.size <= 0, { stop = 1; }); // prevent endless loop
+					remaining_events.addAll(this.traverse(cycle, dur));
+					if(remaining_events.size <= 0, { stop = 1; });
+					// prevent endless loop
 				});
 			});
 		};
@@ -527,25 +537,20 @@ PMNode {
 	log {
 		^format(
 			"% %/% % % \"%\"",
-			this.class.name,
-			slower.asString,
-			faster.asString,
-			up.asString,
-			down.asString,
-			value.asString
+			this.class.name, slower, faster, up, down, value.asString
 		)
 	}
 
 	alter { |dur|
 		case
-		{ "23456789".contains(slower) } { dur = dur * slower.asString.asInteger }
-		{ slower == $? } { dur = dur * (2 + 7.rand) }
-		{};
+		{ slower == $? }
+		{ dur = dur * (2 + 7.rand) }
+		{ dur = dur * max(1, slower.digit) };
 
 		case
-		{ "23456789".contains(faster) } { dur = dur / faster.asString.asInteger }
-		{ faster == $? } { dur = dur / (2 + 7.rand) }
-		{};
+		{ faster == $? }
+		{ dur = dur / (2 + 7.rand) }
+		{ dur = dur / max(1, faster.digit) };
 
 		^dur;
 	}
@@ -553,31 +558,45 @@ PMNode {
 
 // random value ? is deferred until inside the constructor of this class
 PMEvent {
-	var <>type, <>dur, <>degree=0, <>up=0, <>down=0, <>sustain=0;
+	var <>type, <>dur, <val=$0, <>up=$0, <>down=$0, <>sustain=0;
 
-	*new { | type, dur, degree=$0, up=$0, down=$0 |
-		^super.newCopyArgs(
-			type,
-			dur.asFloat,
-			case { degree == $? } { 9.rand } { degree.asString.asInteger },
-			case { up == $? } { 1 + 8.rand } { up.asString.asInteger },
-			case { down == $? } { 1 + 8.rand } { down.asString.asInteger }
-		);
+	*new { | type, dur, val=$0, up=$0, down=$0 |
+		^super.newCopyArgs(type, dur.asFloat, val, up, down);
 	}
 
-	*newFromPMNode { | n, type, dur, degree=$0 |
-		^PMEvent.new(type, dur, degree, n.up, n.down);
+	*newFromPMNode { | node, type, dur, val=$0 |
+		^PMEvent.new(type, dur, val, node.up, node.down);
 	}
 
-	*newFromPMEvent { | event, dur |
-		^super.newCopyArgs(
-			event.type,
-			dur.asFloat,
-			case { event.degree == $? } { 9.rand } { event.degree.asString.asInteger },
-			case { event.up == $? } { 1 + 8.rand } { event.up.asString.asInteger },
-			case { event.down == $? } { 1 + 8.rand } { event.down.asString.asInteger }
-		);
+	*newFromPMEvent { | ev, dur |
+		^super.newCopyArgs(ev.type, dur.asFloat, ev.val, ev.up, ev.down);
 	}
+
+	symval {
+		case
+		{ val.isArray }
+		{ ^val.collect { |it|
+			case
+			{ it == $? } { 9.rand.asSymbol }
+			{ it.asSymbol };
+		}}
+		{ case { val == $? } { ^9.rand.asSymbol } { ^val.asSymbol }};
+	}
+
+	intval {
+		case
+		{ val.isArray }
+		{ ^val.collect { |it|
+			case
+			{ it == $? } { 9.rand }
+			{ it.digit };
+		}}
+		{ case { val == $? } { ^9.rand } { ^val.digit }};
+	}
+
+	intup { case { up == $? } { ^(1 + 8.rand) } { ^up.digit } }
+
+	intdown { case { down == $? } { ^(1 + 8.rand) } { ^down.digit } }
 
 	post {
 		format(
@@ -586,7 +605,7 @@ PMEvent {
 			type,
 			dur,
 			sustain,
-			degree,
+			val,
 			up,
 			down
 		).postln;
