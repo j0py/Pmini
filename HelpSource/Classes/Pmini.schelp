@@ -1,0 +1,38 @@
+TITLE:: Pmini
+summary:: A pseudo pattern enabling Tidal Cycles mininotation in SuperCollider
+categories:: Pattern classes
+related:: Classes/JSMiniParser.
+
+DESCRIPTION::
+Takes a mininotation string as input.
+Returns a pattern that can be used in a Pbind.
+The pattern returns 5 values:
+
+code::
+\trig : 1 should trigger a note, 0 should not (a rest)
+\delta: how long to wait before processing the next step
+\dur  : value to calculate the sustain for a step
+\str  : string value for a step
+\num  : integer value for a step
+::
+
+In a Pbind, you use an array to receive the 5 values, and then you can use the values further in the Pbind to calculate things with (using Pfunc or Pkey).
+
+CLASSMETHODS::
+
+METHOD:: new
+The new method needs a mininotation string as argument.
+
+returns:: a pattern that will return 5 values for every step.
+
+INSTANCEMETHODS::
+
+EXAMPLES::
+
+code::
+Pbindef(\example,
+    [\trig, \delta, \dur, \str, \num], Pmini("1 2 3 4"),
+    \degree, Pfunc({ |e| if(e.trig > 0) { e.str.asInteger } { \rest } }),
+).play
+::
+
