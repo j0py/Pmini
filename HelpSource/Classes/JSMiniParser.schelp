@@ -1,0 +1,81 @@
+TITLE:: JSMiniParser
+summary:: Parses a Tidal Cycles mininotation string and returns steps.
+categories:: Parsers
+related:: Classes/Pmini.
+
+DESCRIPTION::
+The mininotation string is parsed into a tree of objects in memory.
+
+The code:: next_cycle() :: method can be used to make the parser return the next cycle. A cycle is an array of one or more steps.
+
+A step is an array with 5 values:
+
+code::
+\trig : 1 should trigger a note, 0 should not (a rest)
+\delta: how long to wait before processing the next step
+\dur  : value to calculate the sustain for a step
+\str  : string value for a step
+\num  : integer value for a step
+::
+
+CLASSMETHODS::
+
+METHOD:: new
+Needs the mininotation string as the first argument.
+
+ARGUMENT:: str
+The mininotation string to parse.
+
+returns:: a JSMiniParser object.
+
+
+INSTANCEMETHODS::
+
+METHOD:: parse
+Does the actual parsing of the mininotation and builds a tree of objects in memory.
+
+Using that tree, new cycles of steps can be generated.
+
+returns:: nothing
+
+METHOD:: log_tokens
+Debugging aid.
+
+After you have called the "parse" method, you can let the parser log the parsed tokens to the post window.
+
+returns:: nothing
+
+METHOD:: log
+Debugging aid.
+
+Call "log" with the number of cycles to log, and it will log that number of cycles to the post window.
+
+ARGUMENT:: cycles
+An integer.
+
+returns:: nothing
+
+METHOD:: next_cycle
+Uses the internal parse tree to generate the next cycle of steps.
+
+returns:: The next cycle (an array of arrays).
+
+METHOD:: log_nodes
+Debudding aid.
+
+Displays the internal tree of objects to the post window.
+
+returns:: nothing
+
+EXAMPLES::
+
+code::
+JSMiniParser("1 2 3 4").parse.log_tokens;
+
+JSMiniParser("1 2 3 4").parse.log_nodes;
+
+JSMiniParser("1 2 3 4").parse.log(2);
+
+JSMiniParser("1(3,8) <2 4> [4|7|8] [1 2, 3 4 5]").parse.log(3);
+::
+
