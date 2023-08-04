@@ -1,167 +1,80 @@
 # Pmini
-Compact eventpattern generator for SuperCollider
+Tidal Cycles syntax for SuperCollider
 
-> ***06-2023: This repository will end. The Tidy repository takes over***
+Pmini is a pseudo pattern that you can use in a Pbind to generate steps using the Tidal Cycles mininotation. It is a part of my bigger project called "Tidy", whick will also enable you to work with multiple buses (orbits) in the SuperCollider interpreter.
 
-Inspired by ddwChucklib quark by James Harkins and Tidal.
+I start SuperCollider classes with my initials ("JS") so as not to conflict with any other classnames.  
+Pmini is an exception though, as patterns must start with a "P".
 
-```Pmini(<sound>, <specs>)```
+After attendeding the ICLC2023 in Utrecht i want to share this on GitHub.  
 
-```Pmini(<specs>)```
-
-sound: name of a synthdef or sample (optional)   
-numbers: what notes or samples to play
-
-If you omit an argument, the remaining arguments "shift to the left".
-
-# Sound
-
-You can supply the sound to play, as a string. Optional. When omitted, Pmini assumes you want to play the \default synth.
-
-If you supply a "sound", then Pmini will check if there is a sample by that name. If there is, then Pmini will generate a Pbind with a \bufnum key. This Pbind will need a sample playing synthdef name (for the \instrument key), and you can specify that name via the class variable Pmini.playbuf_synthdef, which defaults to "playbuf".
-
-Samples are expected in ```Library.at(\samples)```.
-
-If you have a "samples" folder in the same folder as your current .scd file, then you could do this:
+## Usage example
 
 ```
-s.waitForBoot({
-	("samples".resolveRelative +/+ "*").pathMatch.do({ |bank|
-		Library.put(
-			\samples,
-			bank.basename.withoutTrailingSlash.asSymbol,
-			(bank +/+ "*.*").pathMatch.collect({ |file|
-				Buffer.read(s, file)
-			})
-		);
-	});
-	s.sync;
-});
-```
+// start SuperCollider and then:
 
-This would read ALL files (.wav, .aiff, etc) as samples into the library.
+s.boot
 
-Each sub-folder of the "samples" folder will appear in the Library under the \samples key, and it will hold an Array with audio Buffers read from the files that were found in the sub-folder.
-
-If a sample by the name of the given "sound" is not found, then Pmini assumes there is a Synthdef by that name, and will generate a Pbind playing that synthdef.
-
-# Specs
-
-The ```<specs>``` string supplies multiple specs, separated by capital letters:
-<table>
-<tr>
-<th>capital</th>
-<th>description</th>
-<th>generated Pbind keys</th>
-</tr>
-<tr><td>N</td><td>number</td><td>\type \dur \sustain \degree \bufnum</td></tr>
-<tr><td>A</td><td>amplitude</td><td>\type \dur \amp</td></tr>
-<tr><td>V</td><td>amplitude</td><td>\type \dur \amp</td></tr>
-<tr><td>O</td><td>octave</td><td>\type \dur \octave</td></tr>
-<tr><td>P</td><td>pan</td><td>\type \dur \pan</td></tr>
-</table>
-
-For each key you supply a capital letter, followed by the "spec".   
-
-```"N1234A123P08O5"```
-
-As you can imagine, this could be extended with more capital letters.
-The numeric values range from 0 .. z (0 .. 35).
-
-# Dur
-
-In the key-spec's, one character stands for 1 "step" in a bar/cycle.  
-
-So the "N" spec above, divides the bar in 4 equal steps.  
-With beatsPerBar = 4, each step will then last 1 beat.  
-And so this spec will generate a \dur of 1 for each step.
-
-Each part N, A or P is capable of delivering the \dur key, and so the following rule applies: the \dur key is taken from the _first_ spec that has been supplied but it is _overruled_ by the _last_ spec that has an extra "+" character right after its capital letter.
-
-```"N1234A123P+08"```
-
-In this example, the P part delivers \dur (which will be 2, because the P part divides the bar into 2 steps). The numbers from the other specs will flow through these durations:
-
-```
-N A P
-1 1 0
-2 2 8
-3 3 0
-4 1 8
-1 2 0
-..etc
-```
-
-The syntax for each spec is as follows:
-
-```
-0 .. z  integer value 0 .. 35
-%       random number 1 .. 9 generated once at interpretation time
-?       random number 1 .. 9 generated new for each event
--       plays a rest
-~       glides previous step to a new value
-space   adds sustain to previous step
-
-*n plays step n times faster within the step duration
-/n plays step n times slower within the step duration
-!n repeats a step n times
-'n adds n * 0.1 to degree, or speeds up sample playback rate by n
-,n substract n * 0.1 to degree, or slows down sample playback rate by n
-
-<..>    plays enclosed steps one by one
-[..]    plays enclosed steps within this step (faster)
-{..}    plays one of the enclosed steps randomly
-(..)n   plays enclosed steps together, strum: 0..b neg, c none, d..o pos
-```
-
-# Instrument
-
-Depending on playing a sample or synthdef, the \instrument key will be generated.
-
-# Degree / Bufnum
-
-When a rest is to be generated, \degree will be \rest, which will make the event mechanism of SuperCollider generate a rest.
-
-In all other cases, a number is generated, used to specify \degree (when playing synthdef) or a \bufnum (when playing a sample).
-
-# Amplitude
-
-The values from the A and V spec are multiplied, resulting (after some calculation via dbamp) in a value ranging from 0 to 1. Two specs are used, so that you can use A for an accent pattern, and V for the volume 'in the mix'.  
-If you omit A and V, Pmini will not generate the \amp key.
-
-# Pan
-
-Mostly a float from -1.0 to 1.0. Here we divide integers 0 to 8 by 4 and subtract 1.0, resulting in -1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75 and 1.0. So number 4 will be the center. If you omit P, then Pmini will not generate \pan.
-
-# Can i generate just a pattern, not an eventpattern
-
-You can. If you do not use _any_ capital letter in the "specs" argurment for Pmini, then it assumes that the "specs" argument is only one "spec", and it will generate a Pseq pattern for the supplied spec.
-
-Still, it could then also supply a \dur key, and so then the "sound" argument is used to specify what you want generated:
-
-"dd" : generate ```[\dur, \degree (or \bufnum)]``` for each event  
-"d" : generate \dur for each event  
-"" : generate \degree (or \bufnum) for each event  
-
-So you could:
-```
 Pbind(
-  \instrument, \default,
-  [\dur, \degree], Pmini("dd", "1234")
-  );
-```
-
-Or play a triplet feel:
+  [\trig, \delta, \dur, \str, \num], Pmini("1 2 3 4"),
+	\degree, Pfunc({ |e| if(e.trig > 0) { e.str.asInteger } { \rest } }),
+)
 
 ```
-Pbind(
-  \instrument, \playbuf,
-  \dur, Pmini("d", "123"),
-  \bufnum, Pseq((10..20),inf)
-  );
+
+## the JSMiniParser
+
+The first thing i started working on is the mini-notation.
+
+You can find the full specification for this in the TidalCycles website: http://tidalcycles.org/docs/reference/mini_notation/ . At this time (08-2023) everything is supported, except the "marking your feet" option where you can use a "." to create groups instead of "[]" brackets.
+
+For writing the parser, this website inspired me a lot: (https://supunsetunga.medium.com/writing-a-parser-getting-started-44ba70bb6cc9).
+
+Usage:
+```
+x = JSMiniParser("1 2 <3 6> 4")
+
+x.next_cycle
+x.next_cycle
+```
+Each call to "next_cycle" will return an array of steps, where each step is an array by itself, holding these values: trig, delta, dur, str, num.
+
+```
+- "trig"   : if the step should play, or just occupy time silently
+- "delta"  : the amount of time that should pass before the next step is played
+- "dur"    : the duration of the step in cycles (how long does it "sound")
+- "string" : the string portion of a note (from the "ss:n" format)
+- "number" : the number portion of a note
 ```
 
-## Installation
+The example above should result in cycles "1 2 3 4" and "1 2 6 4".
 
-Just put ```pmini.sc``` in the Extensions folder of your SuperCollider installation.
+JSMiniParser is used in Pmini (and will also be used in Tidy).
+
+The ```log_nodes``` method will log the internal tree that has been parsed to the post window.  
+
+The ```log_tokens``` method will log what tokens have been parsed from the pattern specification.
+
+The ```log(n)``` method will log the first n cycles to the post window.  
+
+These functions can be used to test if the parser is working as expected, and if not, where it may go wrong.
+
+### Inner working
+
+The given pattern string is parsed to a tree of objects, and then the root of that tree is asked for the next cycle (a bunch of steps). The root uses it's children to get their steps and so on. Each child may have different parameters that will make it generate steps differently.  
+This way, the nesting, alternating and such has been implemented.
+
+Things can get pretty complicated if you can do things like "1 2 3/5.11 4".  
+The third step should play a lot more slow than steps 1 2 and 4. What JSMini does is, it reserves a quarter of the cycle for each step, and if a step wants to play slower, then it may do so within the time that has been reserved for it.  
+
+So if for example step 3 is like "3/2", then in the first quarter cycle, it will trigger at the beginning of that quarter. But it will not fit in that quarter, so the remaining time (not fitting in the quarter) is calculated, and remembered in the step object in the parse-tree. The next time this step get's a chance to play in a quarter cycle, it will first check if there still is remaining time to wait out. So first this waiting time is "consumed", and when that has happened, then the step will trigger once again. This may happen at any speed, so "1 2 3/8.4362 4" is perfectly possible.
+
+Playing faster works the same: the quarter cycle is filled with triggered steps until it has been filled completely. It's like filling a bucket (quarter of a step) with water (time). When there is water left over after the bucket is full, it is kept for the next bucket.
+
+The "_" results in a Space node object in the tree. The duration of this step is added to the duration of the previous step, which will then last longer. This works within one cycle, but also over to the next cycle.
+Consider a pattern like ```"<_ 1> 2 _ 3"```: every other cycle, step "3" lasts 1/2 step.
+
+Another thing i encountered with the alternating steps is, that you cannot use the cycle number to select the alternative.I did that at first using a modulo (%) operation: for 2 alternatives, use ```cycle % 2```.  
+If you do that, then a pattern like ```"1 2 <3 <4 5>> 6"``` will result in "1 2 3 6", "1 2 5 6", "1 2 3 6" etc, but never "1 2 4 6". This because "<4 5>" will only be selected when the cycle number is odd, and within this step, "5" will thus always be selected.  
+Each node in the tree counts cycles by itself: each call to the "make more steps" method will increment it. The step uses that for the modulo operation. And then you will get "1 2 3 6", "1 2 4 6", "1 2 3 6", "1 2 5 6", etc.
 

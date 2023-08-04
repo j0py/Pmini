@@ -1,615 +1,610 @@
-/*******************************************************************
+/*
+Takes a mini notation string as input.
+Returns a pattern that can be used in a Pbind.
+The pattern has 5 values:
 
-20220423
+\trig : 1 should trigger a note, 0 should not
+\delta: how long to wait before processing the next step
+\dur  : value to calculate the sustain for a step
+\str  : string value for a step
+\num  : integer value for a step
 
-create trees from a spec (a string)
-
-each tree can then be traversed to generate keys for an event
-each tree is capable of generating \dur, but only one will
-
-N number       \type \dur \sustain \degree \bufnum
-A amplitude    \type \dur \amp
-V amplitude    \type \dur \amp
-O octave       \type \dur \octave
-P pan          \type \dur \pan
-
-example: Pmini(\sound, "N1234A5O4P08")
-returns:
-
+Example:
 Pbind(
-  \instrument, \sound,   // \sound does not exists as a sample
-  \instrument, \playbuf, // if \sound exists as a sample
-  \bufnum, (calculated), // if \sound exists as a sample
-  \dur, 1,               // if beatsPerBar = 4
-  \degree, Pseq([1,2,3,4], inf),
-  \amp, 5,
-  \octave, 4,
-  \pan, Pseq([-1, 1], inf),
-  );
+    [\trig, \delta, \dur, \str, \num], Pmini("1 2 3 4"),
+	\degree, Pfunc({ |e| if(e.trig > 0) { e.str.asInteger } { \rest } }),
+)
 
-each tree is created from its own spec string. spec syntax:
-
-0 .. z  integer value 0 .. 35
-%       random number 1 .. 9 generated once at interpretation time
-?       random number 1 .. 9 generated new for each event
--       plays a rest
-~       glides previous step to a new value
-<space> adds sustain to previous step
-
-*n plays step n times faster within the step duration
-/n plays step n times slower within the step duration
-!n repeats a step n times
-'n adds n * 0.1 to degree, or speeds up sample playback rate by n
-,n substract n * 0.1 to degree, or slows down sample playback rate by n
-
-<..>    plays enclosed steps one by one
-[..]    plays enclosed steps within this step (faster)
-{..}    plays one of the enclosed steps randomly
-(..)n   plays enclosed steps together, strum: 0..b neg, c none, d..o pos
-
-strum not yet implemented
-idea: use "|" to end the stream by returning nil in the next event
-idea: use "!0" (repeat 0 times) to disable a step, !1 to enable again
-idea: "K" = drumkit
-  Pmini.kit = [$_, "bd", 1, $=, "sn", 2, $^, "hh", 3,.. etc]
-  characters useable in "K" spec: #^*-_=':;,.\
-  Pmini("K_'<^[^^]>(_')V8") if "K" is used, then sound arg is ignored
-
-******************************************************************/
-
+*/
 Pmini {
-	classvar playbuf_synthdef=\playbuf;
+	*new { |mini_notation|
+		var parser = JSMiniParser(mini_notation).parse;
+		
+		^Pn(Plazy({	Pseq(parser.next_cycle, 1) }), inf)
+	}
+}
 
-	*new { |sound="", spec=""| ^super.new.init(sound, spec); }
+// returns arrays with 5 elements: \trig, \delta, \dur, \str, \num
+//
+// "1 [2 3]@2"     : 1(1/3) 2(1/3) 3(1/3)
+// "1 [2 3] _"     : 1(1/3) 2(1/6) 3(1/2)
+// "1 [2 3] <4 _>" : 1(1/3) 2(1/6) 3(1/6) 4(1/3), 1(1/3) 2(1/6) 3(1/2)
+//
+// stack/cat: [xxxx, yyy, zzz] parallel or <xxxx, yyy, zzz> in series
+JSMiniParser {
+	var <>lexer, <>root_token, <>root_node, <>queue;
+	
+	*new { |str| ^super.newCopyArgs(JSMiniLexer(str)) }
 
-	init { |sound, spec|
-		// the optional arguments start from the left side here
-		if(spec.asString.size <= 0, { spec = sound; sound="default"; });
-
-		// if spec contains uppercase letters, then return a Pbind
-		if(spec.toLower != spec, { ^this.return_pbind(sound.asSymbol, spec) });
-
-		^this.return_pattern(sound, spec);
+	parse {
+		root_token = JSMiniToken("[");
+		this.parse_tokens(root_token, nil); // parse up to EOF
+		root_node = JSNode.new.parse(root_token);
+		root_node.do_repeats;
+		root_node.dur_(1.0);
 	}
 
-	return_pattern { |sound, spec|
-		var root = PMRoot(spec);
+	log { |cycles=1|
+		var nodes_logged;
+		//this.log_tokens;
+		cycles.do { |cycle_number|
+			var cycle = this.next_cycle;
+			nodes_logged ?? { this.log_nodes; nodes_logged = 1 };
+      "cycle %".format(cycle_number).postln;
+      cycle.do { |step| step.postln; };
+		}
+	}
 
-		case
+	log_nodes { root_node.log }
+	log_tokens { root_token.log }
+	
+	get { ^root_node.get_steps.collect { |step| step.asArray } }
 
-		// [\dur, \degree]
-		{ sound == "dd" } { ^Pn(Plazy({
-			var event = root.next;
-			Pseq([event.dur, event.intval], 1)
-		}));
+	// after all mininotation logic, a cycle comes out, which still
+	// may contain "_" steps. these steps should make the step before
+	// it sound longer and should make no sound by themselves.
+	// this is handled here, just before the cycle is returned.
+	next_cycle {
+		var cycle, prev_step, index;
+		
+		queue = queue ? List.new;
+
+		while { queue.size <= 0 } { queue.add(root_node.get_steps) };
+
+		// check for "_" steps within the cycle
+		// after this, prev_step will be last non "_" step of the cycle
+		(cycle = queue.removeAt(0)).do { |step|
+			if(step.str == "_") {
+				step.trig = 0;
+				if(prev_step.isNil) {
+					step.str = "~";
+				} {
+					prev_step.dur = prev_step.dur + step.dur;
+					step.str = prev_step.str;
+					step.num = prev_step.num;
+				};
+			} {
+				prev_step = step;
+			}
+		};
+		
+		// also check for "_" steps at the start of the next cycle(s)
+		
+		index = 0; // index of the cycle in the queue that we want to check
+        while { index >= 0 } {
+			while
+			{ queue.size <= index }
+			{ queue.add(root_node.get_steps) };
+
+			queue.at(index).do { |step|
+				if(index >= 0) {
+					if(step.str == "_") {
+						step.trig = 0;
+						if(prev_step.isNil) {
+							step.str = "~";
+						} {
+							prev_step.dur = prev_step.dur + step.dur;
+							step.str = prev_step.str;
+							step.num = prev_step.num;
+						}
+					} {
+						index = -1000; // stop after finding a non "_"
+					}
+				}
+			};
+
+			index = index + 1;
 		}
 
-		// \dur
-		{ sound == "d" } { ^Pn(Plazy({ root.next.dur })) }
-
-		// \degree
-		{	^Pn(Plazy({ root.next.intval })) }
+		^cycle.collect { |step| step.asArray };
 	}
-
-	return_pbind { |sound, spec|
-		var part, parts, dur_part, pb;
-
-		// split spec in parts and determine which one defines the durations.
-		// defaults to first part, overridden by last part with a "+" in its spec
-		//
-		parts = Dictionary.new;
-		spec.asString.do { |ch|
+	
+	parse_tokens { |parent, until|
+		var token = lexer.next;
+		
+		while
+		{ token.notNil }
+		{
 			case
-			{ ch.isAlpha.and(ch.isUpper) } { part = ch.toLower.asSymbol }
-			{ part.isNil } { } // wait for the first uppercase char
-			{ ch == $+ } { dur_part = part }
-			{ parts.put(part, parts.atFail(part, "") ++ ch.asString); };
+			{ "[<({".contains(token.val) }
+			{
+				var until = "]>)}".at("[<({".find(token.val));
+				parent.add(token);
+				this.parse_tokens(token, until.asString);
+			}
+			{ token.val == until }
+			{
+				parent.add(token);
+				^token; // return up one recursive level
+			}
+			{
+				parent.add(token); // stay on this level
+			};
 
-			if(dur_part.isNil.and(part.notNil), { dur_part = part; });
-		};
-
-		// parse each part, resulting in a PMRoot object (a tree)
-		parts = parts.collect { |spec| PMRoot(spec) };
-
-		pb = Pbind(
-			\dur, Pfunc({ |ev|
-				var dur, sustain, mid, samples, rest=false, up=0, down=0, degree=0;
-
-				// let each PMRoot create its next PMEvent object
-				var events = parts.collect { |root| root.next };
-
-				dur = events.at(dur_part).dur.asFloat;
-				sustain = events.at(dur_part).sustain.asFloat;
-
-				if(events.includesKey(\n), {
-					degree = events.at(\n).intval;
-					up = events.at(\n).intup;
-					down = events.at(\n).intdown;
-				});
-
-				events.do { |event| if(event.type == \rest, { rest = true }) };
-
-				if(rest, {
-					ev.put(\degree, \rest);
-				}, {
-					var amp;
-
-					if((samples = Library.at(\samples, sound)).notNil, {
-						ev.put(\instrument, playbuf_synthdef);
-						ev.put(\bufnum, samples.wrapAt(degree).bufnum);
-						ev.put(\rate, (up - down).midiratio);
-					}, {
-						ev.put(\instrument, sound);
-						ev.put(\degree, (up - down) * 0.1 + degree);
-
-						// glide mechanism
-						if(events.includesKey(\n), {
-							if(events.at(\n).type == \note, {
-								// setup callback which stores the id of the synth in 'mid'
-								ev.put(\callback, { |ev2|
-									if(ev2.id.class == Array.class, {
-										mid = ev2.id.at(0);
-									}, {
-										mid = ev2.id.asInteger;
-									});
-								});
-								ev.put(\sustain, sustain);
-							});
-
-							if(events.at(\n).type == \set, {
-								ev.put(\type, \set);
-								ev.put(\id, mid);
-								ev.put(\sustain, (dur * 0.5));
-							});
-						});
-
-						// \octave
-						if(events.includesKey(\o), {
-							ev.put(\octave, events.at(\o).intval.clip(2,8));
-						});
-					});
-
-					// \amp
-					if(events.includesKey(\a), {
-						if(events.includesKey(\v), {
-							ev.put(
-								\amp,
-								max(0, (events.at(\v).intval.clip(0,8) - 9 * 6).dbamp - 0.002) *
-								max(0, (events.at(\a).intval.clip(0,8) - 9 * 6).dbamp - 0.002)
-							);
-						}, {
-							ev.put(
-								\amp,
-								max(0, (events.at(\a).intval.clip(0,8) - 9 * 6).dbamp - 0.002)
-							);
-						});
-					}, {
-						if(events.includesKey(\v), {
-							ev.put(
-								\amp,
-								max(0, (events.at(\v).intval.clip(0,8) - 9 * 6).dbamp - 0.002)
-							);
-						});
-					});
-
-					// \pan
-					if(events.includesKey(\p), {
-						ev.put(\pan, events.at(\p).intval.clip(0,8) / 4 - 1);
-					});
-				});
-
-				dur
-			})
-		);
-
-		^pb;
+			token = lexer.next;
+		}
 	}
 }
 
-PMRoot : PMNested {
-	var index = 0, str, cycle, events;
+JSStepQueue {
+	var <>queue;
 
-	*new { |spec| ^super.new.init(spec.asString) }
-
-	init { |spec|
-		str = spec;
-		cycle = -1;
-		events = List.new;
-		^this.parse(this);
+	*new { ^super.newCopyArgs(List.new) }
+	
+	get { |node|
+		while { queue.size <= 0 } { queue.addAll(node.more_steps) };
+		^queue.removeAt(0);
 	}
 
-	parse { |currentNode|
-		var node, parsing=\value;
-
+	get_delta { |node, delta|
+		var result=List.new, time=delta;
 		while
-		{ index < str.size } {
-			var ch = str.at(index);
-			index = index + 1;
+		{ time > 0.0001 }
+		{
+			var step = this.get(node);
+			if(step.delta > (time + 0.0001)) {
+				var d = step.delta -time;
+				queue.insert(0, JSStep(0, d, step.str, step.num));
+				step.delta = time;
+				time = 0;
+			} {
+				time = time - step.delta;
+			};
 
-			if(ch == $%, { ch = "123456789".at(9.rand) });
+			result.add(step);
+		}
 
-			case
-			{ ch == $- } {
-				node = PMRest.new;
-				currentNode.addChild(node);
-				parsing = \value;
-			}
-			{ ch == $  } {
-				node = PMSpace.new;
-				currentNode.addChild(node);
-				parsing = \value;
-			}
-			{ ch == $< } {
-				node = PMTurns.new;
-				this.parse(node);
-				currentNode.addChild(node);
-				parsing = \value;
-			}
-			{ ch == $> } { ^this }
-			{ ch == ${ } {
-				node = PMRandom.new;
-				this.parse(node);
-				currentNode.addChild(node);
-				parsing = \value;
-			}
-			{ ch == $} } { ^this }
-			{ ch == $[ } {
-				node = PMNested.new;
-				this.parse(node);
-				currentNode.addChild(node);
-				parsing = \value;
-			}
-			{ ch == $] } { ^this }
-			{ ch == $~ } { parsing = \glide }
-			{ ch == $* } { parsing = \faster }
-			{ ch == $/ } { parsing = \slower }
-			{ ch == $! } { parsing = \repeat }
-			{ ch == $' } { parsing = \up }
-			{ ch == $, } { parsing = \down }
-			{ ch == $( } {
-				node = PMChord.new;
-				currentNode.addChild(node);
-				parsing = \chord;
-			}
-			{ ch == $) } { parsing = \value }
+		^result;
+	}
+}
 
-			{ parsing == \chord } {
-				currentNode.children.last.add_value(ch);
-			}
-			{ parsing == \value } {
-				// start new node and parse the value (a 1 digit number, or '?')
-				node = PMNote.new;
-				node.value_(ch);
-				currentNode.addChild(node);
-			}
-			{ parsing == \glide } {
-				// start new node and parse the value (a 1 digit number, or '?')
-				node = PMGlide.new;
-				node.value_(ch);
-				currentNode.addChild(node);
-				parsing = \value;
-			}
-			{ parsing == \faster } {
-				if(node.notNil, { node.faster_(ch) });
-				parsing = \value;
-			}
-			{ parsing == \slower } {
-				if(node.notNil, { node.slower_(ch) });
-				parsing = \value;
-			}
-			{ parsing == \up } {
-				if(node.notNil, { node.up_(ch) });
-				parsing = \value;
-			}
-			{ parsing == \down } {
-				if(node.notNil, { node.down_(ch) });
-				parsing = \value;
-			}
-			{ parsing == \repeat } {
-				if(node.notNil, {
-					(max(1, ch.digit) - 1).do {
-						node = currentNode.addChild(node.clone);
+JSNode {
+	var <>children, <>cycle_number, <>queue, <>str, <>num, <>subgroup;
+	var <>euclid, <>degrade, <>slow, <>repeat, <>subdivision, <>elongate;
+	var <>dur, <>on;
+
+	*new { ^super.newCopyArgs(List.new, -1, JSStepQueue.new) }
+	
+	add { |node| children.add(node) }
+
+	get_steps { |dur_override|
+		^queue.get_delta(this, dur_override ? dur)
+	}
+
+	more_steps {
+		var result, d;
+
+		cycle_number = cycle_number + 1;
+		
+		this.do_divide(cycle_number); // fill in dur values in the tree
+		
+		case
+		{ "[{".contains(str) and: (subgroup == ",") } {
+			var step, time, q = PriorityQueue.new;
+
+			result = List.new;
+			
+			if(str == "[")
+			{
+				// polyrhythm
+				children.do { |child|
+					time=0;
+					child.get_steps.do { |step|
+						q.put(time, step);
+						time = time + step.delta;
 					};
-				});
-				parsing = \value;
-			}
-			{ }; // default no action
+				};
+			} {
+				var first_child_dur;
+
+				// polymeter
+				children.do { |child|
+					time=0;
+					first_child_dur = (first_child_dur ? child.dur);
+					
+					child.get_steps(first_child_dur).do { |step|
+						q.put(time, step);
+						time = time + step.delta;
+					};
+				};
+			};
+			
+			time = 0;
+			while { q.notEmpty } {
+				var next = q.topPriority();
+				step = q.pop();
+				result.last !? { result.last.delta_(next - time) };
+				result.add(step);
+				time = next;
+			};
+			result.last !? { result.last.delta_(1 - time) };
+		}
+
+		{ (str == "[") and: (subgroup == "|") } {
+			// random
+			result = children.choose.get_steps.flatten;
+		}
+
+		{ str == "{" } {
+			// subdivision
+			result = subdivision.collect { |index|
+				children.wrapAt(index).get_steps
+			} .flatten;
+		}
+
+		{ str == "<" } {
+			// alternate
+			result = children.wrapAt(cycle_number).get_steps.flatten
+		}
+		
+		{ ",|[".contains(str) } {
+			result = children.collect { |child|
+				child.get_steps
+			} .flatten;
+		}
+
+		{ result = [ JSStep(1, 1, str, num) ] };
+
+		// apply slow
+		d = dur * ((slow ? "1").asFloat);
+		result.do { |step|
+			step.dur_(step.dur * d);
+			step.delta_(step.delta * d);
 		};
 
-		^this; // you are the root node of the tree, so return yourself
+		
+		/*
+
+			[1 2]         : 1(1/2) 2(1/2)
+			[1 2(3,8)]    : 1(1/2) 2(3/16) 2(3/16) 2(2/16)
+			[1 2](3,8)    : 1(3/16) 2(3/16) 1(3/16) 2(3/16) 1(2/16) 2(2/16)
+
+			just repeat the array of steps according to your euclid xyz
+			on the root node, euclid is not allowed / possible
+			so, do it on your children during get_steps
+
+		*/
+		if(euclid.notNil) {
+			var x=1, y=1, z=0, time;
+
+			// TODO: loop keeps looping when it could already stop!
+			time = 0;
+			euclid.children.at(0).get_steps.do { |step|
+				if(on < (time + step.delta - 0.0001)) {
+					x = step.str.asInteger;
+					time = -1000;
+				};
+				time = time + step.delta;
+			};
+			
+			time = 0;
+			euclid.children.at(1).get_steps.do { |step|
+				if(on < (time + step.delta - 0.0001)) {
+					y = step.str.asInteger;
+					time = -1000;
+				};
+				time = time + step.delta;
+			};
+
+			if(euclid.children.size > 2) {
+				time = 0;
+				euclid.children.at(2).get_steps.do { |step|
+					if(on < (time + step.delta - 0.0001)) {
+						z = step.str.asInteger;
+						time = -1000;
+					};
+					time = time + step.delta;
+				};
+			};
+
+			result = this.get_euclid_steps(result, x, y, z);
+		}
+
+		^result;
 	}
+
+	get_euclid_steps { |steps, xval, yval, rval|
+		var slots, sum, left_over, spread;
+
+		// https://www.lawtonhall.com/blog/euclidean-rhythms-pt1
+		// distribute y things over x slots rather evenly (y > x)
+
+		// 1: fill all slots equally with as much things as possible
+		slots = Array.fill(xval, yval.div(xval));
+
+		// 2: calculate how many things are left over
+		left_over = yval - (slots[0] * xval);
+
+		// 3: distribute the leftover things evenly, adding 1 to some slots
+		spread = xval.div(left_over);
+		left_over.do { |i| i = i * spread; slots[i] = slots[i] + 1 };
+
+		// 4: rotate
+		slots = slots.rotate(rval ?? 0);
+
+		// 5: modify the given steps
+		sum = slots.sum;
+
+		^slots.collect { |slot|
+			steps.deepCopy.collect { |step|
+				step.dur = step.dur * slot / sum;
+				step.delta = step.delta * slot / sum;
+				step;
+			}
+		} .flatten;
+	}
+
+	/* ---- debugging -- */
+	
+	log { |indent = ""|
+		var modstr="";
+		
+		slow !? { modstr = modstr ++ "/%".format(slow.round(0.01)) };
+		repeat !? { modstr = modstr ++ "!%".format(repeat) };
+		subdivision !? { modstr = modstr ++ "%%".format("%",subdivision) };
+		elongate !? { modstr = modstr ++ "@%".format(elongate) };
+		degrade !? { modstr = modstr ++ "?%".format(degrade) };
+		subgroup !? { modstr = modstr ++ subgroup };
+		
+		"% % % %".format(
+			indent,
+			str.quote,
+			(dur ? 0).asFloat.round(0.001),
+			modstr
+		).postln;
+		
+		children.do { |child| child.log(indent ++ "--") };
+		euclid !? { euclid.log(indent ++ "**") };
+	}
+
+	printOn { |stream| stream << "% %".format(str, euclid) }
+
+	/* ----- parsing ---- */
+	modify { |what, value|
+		case
+		{ what == "/" } { slow = (slow ? 1) * (value.asFloat) }
+		{ what == "*" } { slow = (slow ? 1) / (value.asFloat) }
+		{ what == "@" } { elongate = value.asFloat }
+		{ what == "!" } { repeat = value.asInteger }
+		{ what == "%" } { subdivision = value.asInteger }
+		{ what == "?" } { degrade = value.asFloat }
+		{ what == ":" } { num = value.asInteger }
+		{};
+	}
+
+	maybe_add_new {
+		if(children.last.str.notNil) { children.add(JSNode.new) };
+	}
+	
+	parse { |token|
+		var index = 0;
+		str = token.val;
+
+		while { index < token.children.size } {
+			var child_token = token.children.at(index);
+			var child_val = child_token.val;
+			
+			index = index + 1;
+			
+			if(children.size <= 0) { children.add(JSNode.new) };
+
+			case
+			{ "]>)}".contains(child_token.val) } { /* ignore */ }
+			{ child_val == " " } { this.maybe_add_new }
+			{ "|,".contains(child_val) } {
+				subgroup = child_val;
+				this.maybe_add_new;
+				children.last.str_(child_val);
+				children.add(JSNode.new);
+			}
+			{ "/@*!%:".contains(child_val) } {
+				var val = token.children.at(index).val;
+				children.last.modify(child_val, val);
+				index = index + 1;
+			}
+			{ "?".contains(child_val) } {
+				var val = 0.5; // standard value, next token is optional
+				if(index < token.children.size) {
+					var nextval = token.children.at(index).val;
+					if(nextval.asFloat.asString == nextval) {
+						val = nextval.asFloat.clip(0.0, 1.0);
+						index = index + 1; // consume the token
+					}
+				};
+				children.last.modify(child_val, val);
+			}
+			{ child_val == "(" }
+			{
+				children.last.euclid = JSNode.new.parse(child_token)
+			}
+			{ children.last.parse(child_token) };
+		};
+
+		if(subgroup.notNil) {
+			var newchildren = List.new.add(JSNode.new.str_(subgroup));
+			children.do { |child|
+				case
+				{ child.str == subgroup }
+				{ newchildren.add(JSNode.new.str_(subgroup)) }
+				{ newchildren.last.add(child) }
+			};
+			children = newchildren;
+		}
+	}
+
+	do_repeats {
+		children.do { |child| child.do_repeats }; // bottum up
+		
+		// if any of your children needs to be repeated, then do so now
+		children = children.collect({ |child|
+			var repeat = child.repeat;
+
+			child.repeat = nil;
+
+			case
+			{ repeat.isNil } { child }
+			{ repeat <= 1 } { child }
+			{ repeat.collect { child.deepCopy } };
+		}).flatten.asList;
+
+		euclid !? { euclid.do_repeats };
+	}
+
+	// establish a dur for all your children
+	do_divide { |cycle_number|
+		var sum, time;
+
+		sum = children.collect { |child| (child.elongate ? 1) } .sum;
+		
+		children.do { |child|
+			case
+			{ str == "<" } { child.dur = (child.elongate ? 1) }
+			{ str == "(" } { child.dur = 1 }
+			{ str == "[" } {
+				case
+				{ ",|".contains(child.str) } { child.dur = 1 }
+				{ child.dur = (child.elongate ? 1) / sum }
+			}
+			{ str == "{" } {
+				var first_child_count = children.first.children.size;
+				
+				case
+				{ subdivision.notNil }
+				{ child.dur = 1 / subdivision }
+				{ child.str == "," }
+				{
+					case
+					{ child == children.first }
+					// first child gets duration 1
+					{ child.dur = 1	}
+
+					// other childs must wrap their children
+					// so i give them duration relative to
+					// first child, based on the amount of children
+					{ child.dur = child.children.size / first_child_count }
+				}
+				// there must be a subdivision or grouping
+				{ "do_divide: unknown {} situation".throw };
+			}
+			{ child.dur = (child.elongate ? 1) / sum }
+		};
+
+		// also give each child a value for "on", which will be used
+		// for when calculating xyz euclid values
+		time = 0;
+		children.do { |child|
+			child.on = time;
+			time = time + child.dur;
+		};
+		
+		// recurse down the tree
+		children.do { |child| child.do_divide(cycle_number) };
+
+		euclid !? { euclid.do_divide(cycle_number) };
+	}
+}
+
+JSMiniLexer {
+	var <>str, <>tokens, <>index;
+
+	*new { |str| ^super.newCopyArgs(str, List.new, 0) }
 
 	next {
-		var event, index, type, sustain;
+		if(tokens.size <= 0) { this.parse_one_token };
+		if(tokens.size > 0) { ^JSMiniToken(tokens.removeAt(0)) };
+		^nil;
+	}
 
-		if(events.size < 1, { this.make_more_events(); });
-
-		event = events.removeAt(0);
-
-		if(event.type == \space, { event.type_(\rest); ^event });
-		if(event.type == \glide, { event.type_(\set); ^event });
-		if(event.type == \rest, { ^event });
-
-		// we have a \note here
-
-		// make_more_events until you encounter the next \note or \rest
-		// and calculate \sustain for the current \note by summing the
-		// \dur values of all the \space and \glide events up until the
-		// next \note.
-		// after calculating this \sustain, then you can return the
-		// current \note or \rest event to be played.
-
-		sustain = event.dur * 0.8;
-
-		if(events.size < 1, { this.make_more_events() });
-
-		index = 0;
-		type = events.at(index).type;
-
-		while { (type != \note).and(type != \rest) }
-		{
-			//["--", index, type, events.at(index).dur, sustain].postln;
-			sustain = sustain + events.at(index).dur;
-			index = index + 1;
-			if(events.size <= index, { this.make_more_events() });
-			type = events.at(index).type;
+	peek { |offset|
+		while { (tokens.size <= offset) and: (index < str.size) } {
+			this.parse_one_token
 		};
-
-		event.sustain_(sustain);
-
-		^event;
+		
+		if(tokens.size > offset) { ^JSMiniToken(tokens.at(offset)) };
+		
+		^nil;
 	}
-
-	make_more_events {
-		var dur = 4;
-
-		if(thisThread.clock.class == TempoClock.class, {
-			dur = thisThread.clock.beatsPerBar;
-		});
-
-		cycle = cycle + 1;
-
-		events.addAll(super.get_events(cycle, dur));
-	}
-}
-
-PMNote : PMNode {
-	traverse { |cycle, dur|
-		^List.newFrom([
-			PMEvent.newFromPMNode(this, \note, this.alter(dur), value)
-		]);
-	}
-}
-
-PMChord : PMNode {
-	traverse { |cycle, dur|
-		^List.newFrom([
-			PMEvent.newFromPMNode(this, \note, this.alter(dur), value)
-		]);
-	}
-
-	add_value { |ch|
-		if(value.isArray, {
-			value = value.add(ch);
-		}, {
-			value = [ch];
-		});
-	}
-}
-
-PMRest : PMNode {
-	traverse { |cycle, dur|
-		^List.newFrom([
-			PMEvent.newFromPMNode(this, \rest, this.alter(dur))
-		]);
-	}
-}
-
-PMSpace : PMNode {
-	traverse { |cycle, dur|
-		^List.newFrom([
-			PMEvent.newFromPMNode(this, \space, this.alter(dur))
-		]);
-	}
-}
-
-PMGlide : PMNode {
-	traverse { |cycle, dur|
-		^List.newFrom([
-			PMEvent.newFromPMNode(this, \glide, this.alter(dur), value)
-		]);
-	}
-}
-
-PMNested : PMNode {
-	traverse { |cycle, dur|
-		var d, result = List.new;
-
-		d = this.alter(dur) / children.size;
-		children.do { |node| result.addAll(node.get_events(cycle, d)) }
-		^result;
-	}
-}
-
-PMTurns : PMNode {
-	traverse { |cycle, dur|
-		var node = children.wrapAt(cycle);
-		^List.newFrom(node.get_events(cycle, this.alter(dur)));
-	}
-}
-
-PMRandom : PMNode {
-	traverse { |cycle, dur|
-		var node = children.choose;
-		^List.newFrom(node.get_events(cycle, this.alter(dur)));
-	}
-}
-
-PMNode {
-	var <>parent, <children, <>prev, <>next, <>value;
-	var <>faster=$1, <>slower=$1;
-	var <>up=$0, <>down=$0;
-	var remaining_events, remain = 0;
-
-	*new { ^super.new.initPMNode; }
-
-	initPMNode {
-		children = List.new;
-		remaining_events = List.new;
-		^this
-	}
-
-	clone {
-		var clone = this.class.new;
-		clone.value_(value);
-		clone.faster_(faster);
-		clone.slower_(slower);
-		clone.up_(up);
-		clone.down_(down);
-
-		children.do { |child| clone.addChild(child.clone) };
-
-		^clone;
-	}
-
-	addChild { |node|
-		node.parent_(this);
-		if(children.size > 0, {
-			children.last.next_(node);
-			node.prev_(children.last);
-		});
-
-		children.add(node);
-
-		^node;
-	}
-
-	// @return List[PMEvent, PMEvent, ..]
-	get_events { |cycle, dur|
-		var result = List.new;
-		var stop = 0, duration = dur;
-
+	
+	parse_one_token {
+		var val = nil;
+		
 		while
-		{ (duration > 0).and(stop <= 0) }
+		{ index < str.size }
 		{
-			if(remain > 0, {
-				if(duration >= remain, {
-					result.add(PMEvent(\space, remain, $0));
-					duration = duration - remain;
-					if(duration < 0.0001, { duration = 0; });
-					remain = 0;
-				}, {
-					result.add(PMEvent(\space, duration, $0));
-					remain = remain - duration;
-					if(remain < 0.0001, { remain = 0; });
-					duration = 0;
-				});
-			}, {
-				if(remaining_events.size > 0, {
-					var event = remaining_events.removeAt(0);
-					if(event.dur > duration, {
-						result.add(PMEvent.newFromPMEvent(event, duration));
-						remain = event.dur - duration;
-						if(remain < 0.0001, { remain = 0; });
-						duration = 0;
-					}, {
-						result.add(event);
-						duration = duration - event.dur;
-						if(duration < 0.0001, { duration = 0; });
-					});
-				}, {
-					remaining_events.addAll(this.traverse(cycle, dur));
-					if(remaining_events.size <= 0, { stop = 1; });
-					// prevent endless loop
-				});
-			});
+			var ch = str[index];
+
+			index = index + 1;
+
+			case
+			{ ch == $. } {
+				if(val.isNil) { ^tokens.add(ch) } { val = val ++ ch };
+			}
+			{ ("[]{}()<>,%/*!|_~@?: ").contains(ch) } {
+				val !? { tokens.add(val); val = nil; };
+				^tokens.add(ch);
+			}
+			{ val = val ++ ch };
 		};
 
-		^result;
-	}
-
-	post { |indent=""|
-		(indent ++ this.log).postln;
-		children.do({ |node| node.post(indent ++ "--") });
-		^this;
-	}
-
-	log {
-		^format(
-			"% %/% % % \"%\"",
-			this.class.name, slower, faster, up, down, value.asString
-		)
-	}
-
-	alter { |dur|
-		case
-		{ slower == $? }
-		{ dur = dur * (2 + 7.rand) }
-		{ dur = dur * max(1, slower.digit) };
-
-		case
-		{ faster == $? }
-		{ dur = dur / (2 + 7.rand) }
-		{ dur = dur / max(1, faster.digit) };
-
-		^dur;
+		val !? { tokens.add(val); val = nil; };
 	}
 }
 
-// random value ? is deferred until inside the constructor of this class
-PMEvent {
-	var <>type, <>dur, <val=$0, <>up=$0, <>down=$0, <>sustain=0;
+JSMiniToken {
+	var <>val, <>children;
+	
+	*new { |val| ^super.newCopyArgs(val.asString, List.new)	}
 
-	*new { | type, dur, val=$0, up=$0, down=$0 |
-		^super.newCopyArgs(type, dur.asFloat, val, up, down);
+	add { |token| children.add(token) }
+
+	addAll { |aList| children.addAll(aList) }
+	
+	log { |indent = ""|
+		"% %".format(indent, val.quote).postln;
+		children.do { |child| child.log(indent ++ "--") };
 	}
 
-	*newFromPMNode { | node, type, dur, val=$0 |
-		^PMEvent.new(type, dur, val, node.up, node.down);
+	printOn { |stream| stream << "token %".format(val.quote) }
+}
+
+JSStep {
+	var <>trig, <>dur, <>str, <>num, <>delta;
+
+	*new { |trig, dur, str, num|
+		^super.newCopyArgs(trig, dur, str, num, dur)
 	}
 
-	*newFromPMEvent { | ev, dur |
-		^super.newCopyArgs(ev.type, dur.asFloat, ev.val, ev.up, ev.down);
+	asArray {
+		^[trig, delta, dur, str, num];
 	}
-
-	symval {
-		case
-		{ val.isArray }
-		{ ^val.collect { |it|
-			case
-			{ it == $? } { 9.rand.asSymbol }
-			{ it.asSymbol };
-		}}
-		{ case { val == $? } { ^9.rand.asSymbol } { ^val.asSymbol }};
-	}
-
-	intval {
-		case
-		{ val.isArray }
-		{ ^val.collect { |it|
-			case
-			{ it == $? } { 9.rand }
-			{ it.digit };
-		}}
-		{ case { val == $? } { ^9.rand } { ^val.digit }};
-	}
-
-	intup { case { up == $? } { ^(1 + 8.rand) } { ^up.digit } }
-
-	intdown { case { down == $? } { ^(1 + 8.rand) } { ^down.digit } }
-
-	post {
-		format(
-			"% % % % % % %",
-			this.class.name,
-			type,
-			dur,
-			sustain,
-			val,
-			up,
-			down
-		).postln;
-
-		^this;
+	
+	printOn { |stream|
+		stream << "step % % % % %".format(
+			trig,
+			delta.round(0.01),
+			dur.round(0.01),
+			str.quote,
+			num
+		);
 	}
 }
