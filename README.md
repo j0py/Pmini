@@ -22,6 +22,9 @@ Pbind(
 
 ```
 
+I made a video to explain a bit more about how you can use the Pmini class:  
+https://www.youtube.com/watch?v=dsB9Ue1o6Eg
+
 ## the JSMiniParser
 
 The first thing i started working on is the mini-notation.
