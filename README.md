@@ -25,6 +25,18 @@ Pbind(
 I made a video to explain a bit more about how you can use the Pmini class:  
 https://www.youtube.com/watch?v=dsB9Ue1o6Eg
 
+## JSMini
+
+I added this class so that you can use mininotation to generate steps without using any Pattern classes.
+
+```
+parser = JSMini("1 2 3 4");
+
+parser.next();  // returns [1, 0.25, 0.25, 1, nil]
+parser.next();  // returns [1, 0.25, 0.25, 2, nil]
+...
+```
+
 ## the JSMiniParser
 
 The first thing i started working on is the mini-notation.
