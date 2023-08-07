@@ -1,7 +1,7 @@
 (
   name: "Pmini",
   summary: "Use Tidal Cycles mininotation in SuperCollider Pbind.",
-  version: "1.0.0",
+  version: "1.0.1",
   schelp: "Pmini",
   dependencies: [],
   license: "GPL",
