@@ -1,0 +1,62 @@
+TITLE:: JSMini
+summary:: Convert mininotation string to steps
+categories:: mininotation
+related:: Classes/Pmini
+
+DESCRIPTION::
+With JSMini you can convert a mininotation string to steps by calling the "next()" method on the JSMini object.
+
+You could use that in a Routine, and then in the Routine loop you call the "next()" method. You will then receive the next step in the form of an array containing 5 values:
+
+code::
+\trig : 1 should trigger a note, 0 should not (a rest)
+\delta: how long to wait before processing the next step
+\dur  : value to calculate the sustain for a step
+\str  : string value for a step
+\num  : integer value for a step
+::
+
+And then you could use that to trigger some synth somewhere somehow.
+
+CLASSMETHODS::
+
+METHOD:: new
+Create a new JSMini object
+
+ARGUMENT:: mini_notation
+The mininotation string to parse
+
+returns:: the JSMini object
+
+
+INSTANCEMETHODS::
+
+METHOD:: next
+Get the next step to play, according to the mininotation string
+
+returns:: Array object with values \trig, \delta, \dur, \str, \num
+
+
+EXAMPLES::
+
+code::
+(
+Routine({
+	var parser = JSMini("[1 [2 2] 3 4]/4");
+	
+	loop {
+		var synth, freq;
+		var trig, delta, dur, str, num;
+
+		# trig, delta, dur, str, num = parser.next();
+
+		freq = (str.asInteger + 60).midicps;
+		s.bind { synth = Synth(\default, [freq: freq]) };
+
+		delta.wait;
+
+		s.bind { synth.set(\gate, 0) };
+	}
+}).play
+)
+::
