@@ -1,7 +1,7 @@
 TITLE:: JSMiniParser
 summary:: Parses a Tidal Cycles mininotation string and returns steps.
 categories:: Parsers
-related:: Classes/Pmini.
+related:: Classes/Pmini
 
 DESCRIPTION::
 The mininotation string is parsed into a tree of objects in memory.
