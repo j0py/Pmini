@@ -24,6 +24,21 @@ Pmini {
 	}
 }
 
+// this one you can use in a Routine without using Patterns at all
+JSMini {
+    var parser, queue;
+
+    *new { |mini_notation|
+        ^super.newCopyArgs(JSMiniParser(mini_notation).parse);
+    }
+
+    next {
+        queue = queue ? List.new;
+        if(queue.size <= 0) { queue.addAll(parser.next_cycle) };
+        ^queue.removeAt(0);
+    }
+}
+
 // returns arrays with 5 elements: \trig, \delta, \dur, \str, \num
 //
 // "1 [2 3]@2"     : 1(1/3) 2(1/3) 3(1/3)
