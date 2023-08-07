@@ -32,8 +32,8 @@ I added this class so that you can use mininotation to generate steps without us
 ```
 parser = JSMini("1 2 3 4");
 
-parser.next();  // returns [1, 0.25, 0.25, 1, nil]
-parser.next();  // returns [1, 0.25, 0.25, 2, nil]
+parser.next();  // returns [1, 0.25, 0.25, "1", nil]
+parser.next();  // returns [1, 0.25, 0.25, "2", nil]
 ...
 ```
 
