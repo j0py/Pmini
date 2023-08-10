@@ -18,34 +18,58 @@ Pbind(
 */
 Pmini {
 	*new { |mini_notation|
-		var parser = JSMiniParser(mini_notation).parse;
+		var parser = JSMini(mini_notation);
 		
-		^Pn(Plazy({	Pseq(parser.next_cycle, 1) }), inf)
+		^Pn(Plazy({	Pseq(parser.cycle, 1) }), inf)
 	}
 }
 
-// this one you can use in a Routine without using Patterns at all
+// Exposes the main methods that you would want to use.
 JSMini {
-    var parser, queue;
+	var parser, queue;
+	
+	*new { |mini_notation|
+		^super.newCopyArgs(JSMiniParser(mini_notation).parse);
+	}
 
-    *new { |mini_notation|
-        ^super.newCopyArgs(JSMiniParser(mini_notation).parse);
-    }
+	// return the next step, in the form of an array:
+	// [\trig, \delta, \dur, \str, \num]
+	step {
+		queue = queue ? List.new;
+		if(queue.size <= 0) { queue.addAll(parser.next_cycle) };
+		^queue.removeAt(0);
+	}
 
-    next {
-        queue = queue ? List.new;
-        if(queue.size <= 0) { queue.addAll(parser.next_cycle) };
-        ^queue.removeAt(0);
-    }
+	// return the next cycle, in the form of an array:
+	// [
+	//   [\trig, \delta, \dur, \str, \num],
+	//   [\trig, \delta, \dur, \str, \num],
+	//   [\trig, \delta, \dur, \str, \num],
+	//   ..
+	// ]
+	cycle {	^parser.next_cycle }
+
+	// log the first n cycles to the post window, for debugging
+	log { |cycles=1| parser.log(cycles) }
+
+	// log the tree of nodes to the post window, for debugging
+	log_nodes { parser.log_nodes }
+
+	// log the parsed tokens to the post window, for debugging
+	log_tokens { parser.log_tokens }
 }
 
+// all the classes below this line you should never need to known about
+// ====================================================================
+// unless you want to know how everything works
+
+// the main parser class.
 // returns arrays with 5 elements: \trig, \delta, \dur, \str, \num
 //
 // "1 [2 3]@2"     : 1(1/3) 2(1/3) 3(1/3)
 // "1 [2 3] _"     : 1(1/3) 2(1/6) 3(1/2)
 // "1 [2 3] <4 _>" : 1(1/3) 2(1/6) 3(1/6) 4(1/3), 1(1/3) 2(1/6) 3(1/2)
 //
-// stack/cat: [xxxx, yyy, zzz] parallel or <xxxx, yyy, zzz> in series
 JSMiniParser {
 	var <>lexer, <>root_token, <>root_node, <>queue;
 	
@@ -65,8 +89,8 @@ JSMiniParser {
 		cycles.do { |cycle_number|
 			var cycle = this.next_cycle;
 			nodes_logged ?? { this.log_nodes; nodes_logged = 1 };
-      "cycle %".format(cycle_number).postln;
-      cycle.do { |step| step.postln; };
+			"cycle %".format(cycle_number).postln;
+			cycle.do { |step| step.postln; };
 		}
 	}
 

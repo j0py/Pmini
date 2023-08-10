@@ -1,12 +1,14 @@
 TITLE:: JSMini
-summary:: Convert mininotation string to steps
-categories:: mininotation
+summary:: Convert a mini-notation string to steps
+categories:: mini-notation
 related:: Classes/Pmini
 
 DESCRIPTION::
-With JSMini you can convert a mininotation string to steps by calling the "next()" method on the JSMini object.
+With JSMini you can convert a mini-notation string to steps by calling the "cycle()" or "step()" method.
 
-You could use that in a Routine, and then in the Routine loop you call the "next()" method. You will then receive the next step in the form of an array containing 5 values:
+Cycle() will return the next cycle to play, which consists of one or more steps.
+
+Step() will return the next step to play, which is an array with 5 values:
 
 code::
 \trig : 1 should trigger a note, 0 should not (a rest)
@@ -16,7 +18,7 @@ code::
 \num  : integer value for a step
 ::
 
-And then you could use that to trigger some synth somewhere somehow.
+You can use the 5 values any way you want.
 
 CLASSMETHODS::
 
@@ -24,18 +26,39 @@ METHOD:: new
 Create a new JSMini object
 
 ARGUMENT:: mini_notation
-The mininotation string to parse
+The mini-notation string to parse
 
 returns:: the JSMini object
 
-
 INSTANCEMETHODS::
 
-METHOD:: next
-Get the next step to play, according to the mininotation string
+METHOD:: step
+Get the next step to play, according to the mini-notation string
 
 returns:: Array object with values \trig, \delta, \dur, \str, \num
 
+METHOD:: cycle
+Get the next cycle to play, according to the mini-notation string
+
+returns:: Array object with one or more steps (sub-arrays) in it
+
+METHOD:: log_nodes
+Log the internal node-tree to the post window, for debugging
+
+returns::
+
+METHOD:: log_tokens
+Log the parsed tokens to the post window, for debugging
+
+returns::
+
+METHOD:: log
+Logs the given number of cycles to the post window, for debugging
+
+ARGUMENT:: cycles
+An integer.
+
+returns::
 
 EXAMPLES::
 
@@ -48,9 +71,10 @@ Routine({
 		var synth, freq;
 		var trig, delta, dur, str, num;
 
-		# trig, delta, dur, str, num = parser.next();
+		# trig, delta, dur, str, num = parser.step();
 
 		freq = (str.asInteger + 60).midicps;
+		
 		s.bind { synth = Synth(\default, [freq: freq]) };
 
 		delta.wait;
