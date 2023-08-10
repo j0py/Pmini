@@ -1,7 +1,7 @@
 TITLE:: Pmini
 summary:: A pseudo pattern enabling Tidal Cycles mini-notation in SuperCollider
 categories:: Pattern classes
-related:: Classes/JSMiniParser.
+related:: Classes/JSMini
 
 DESCRIPTION::
 Takes a mini-notation string as input.
