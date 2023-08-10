@@ -1,6 +1,6 @@
 (
   name: "Pmini",
-  summary: "Use Tidal Cycles mininotation in SuperCollider Pbind.",
+  summary: "Use Tidal Cycles mini-notation in SuperCollider Pbind.",
   version: "1.0.2",
   schelp: "Pmini",
   dependencies: [],
