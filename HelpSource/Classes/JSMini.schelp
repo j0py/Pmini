@@ -45,20 +45,14 @@ returns:: Array object with one or more steps (sub-arrays) in it
 METHOD:: log_nodes
 Log the internal node-tree to the post window, for debugging
 
-returns::
-
 METHOD:: log_tokens
 Log the parsed tokens to the post window, for debugging
-
-returns::
 
 METHOD:: log
 Logs the given number of cycles to the post window, for debugging
 
 ARGUMENT:: cycles
 An integer.
-
-returns::
 
 EXAMPLES::
 
