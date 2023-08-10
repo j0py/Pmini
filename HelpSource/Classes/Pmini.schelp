@@ -1,10 +1,10 @@
 TITLE:: Pmini
-summary:: A pseudo pattern enabling Tidal Cycles mininotation in SuperCollider
+summary:: A pseudo pattern enabling Tidal Cycles mini-notation in SuperCollider
 categories:: Pattern classes
 related:: Classes/JSMiniParser.
 
 DESCRIPTION::
-Takes a mininotation string as input.
+Takes a mini-notation string as input.
 Returns a pattern that can be used in a Pbind.
 The pattern returns 5 values:
 
@@ -21,7 +21,7 @@ In a Pbind, you use an array to receive the 5 values, and then you can use the v
 CLASSMETHODS::
 
 METHOD:: new
-The new method needs a mininotation string as argument.
+The new method needs a mini-notation string as argument.
 
 returns:: a pattern that will return 5 values for every step.
 

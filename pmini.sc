@@ -1,5 +1,5 @@
 /*
-Takes a mini notation string as input.
+Takes a mini-notation string as input.
 Returns a pattern that can be used in a Pbind.
 The pattern has 5 values:
 
@@ -99,7 +99,7 @@ JSMiniParser {
 	
 	get { ^root_node.get_steps.collect { |step| step.asArray } }
 
-	// after all mininotation logic, a cycle comes out, which still
+	// after all mini-notation logic, a cycle comes out, which still
 	// may contain "_" steps. these steps should make the step before
 	// it sound longer and should make no sound by themselves.
 	// this is handled here, just before the cycle is returned.
