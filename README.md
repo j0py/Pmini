@@ -19,7 +19,7 @@ s.boot
 Pbind(
   [\trig, \delta, \dur, \str, \num], Pmini("1 2 3 4"),
   \degree, Pfunc({ |e| if(e.trig > 0) { e.str.asInteger } { \rest } }),
-)
+).play
 
 ```
 
@@ -31,7 +31,7 @@ You can find the full specification for this in the Tidal Cycles website: http:/
 
 For writing the parser, this website inspired me a lot: (https://supunsetunga.medium.com/writing-a-parser-getting-started-44ba70bb6cc9).
 
-JSMini will parse the given mini-notation string and return the cycles/steps to you in the form of arrays that contain numbers and/or strings. A "cycles" is just an array of steps, and a step is an array containing:
+JSMini will parse the given mini-notation string and return the cycles/steps to you in the form of arrays that contain numbers and/or strings. A "cycle" is just an array of steps, and a step is an array containing:
 
 ```
 - "trig"   : if the step should play (value = 1), or just occupy time silently (0)
@@ -73,10 +73,10 @@ So if for example step 3 is like "3/2", then in the first quarter cycle, it will
 Playing faster works the same: the quarter cycle is filled with triggered steps, each occupying some amount of time, until it has been filled completely. It's like filling a bucket (quarter of a step) with water (time). When there is water left over after the bucket is full, it is kept for the next bucket.
 
 The "_" character in the pattern will add it's available time to the step before it, which will then last longer. This works within one cycle, but also over to the next cycle.
-Consider a pattern like ```"<_ 1> 2 _ 3"```: every other cycle, step "3" should last 1/2 step.
+Consider a pattern like ```"<_ 1> 2 _ 3"```: every other cycle, step "3" should last 1/2 cycle.
 
-Another thing i encountered with alternating steps is, that you cannot use the cycle number to select the alternative. I did that at first using a modulo (%) operation: for 2 alternatives, i uses ```cycle % 2```.  
-But if you do that, then a pattern like ```"1 2 <3 <4 5>> 6"``` will result in "1 2 3 6", "1 2 5 6", "1 2 3 6" etc, but never "1 2 4 6". This is because "<4 5>" will only be selected when the cycle number is odd, and within this sub-pattern, "5" will thus always be selected.  
+Another thing i encountered with alternating steps is, that you cannot use the cycle number to select the alternative. I did that at first using a modulo (%) operation: for 2 alternatives, i used ```cycle % 2```.  
+But if you do that, then a pattern like ```"1 2 <3 <4 5>> 6"``` will result in "1 2 3 6", "1 2 5 6", "1 2 3 6" etc, but never "1 2 4 6". This is because "<4 5>" will only be selected when the cycle number is odd, and within this sub-pattern, "5" will always be selected because the cycle number is odd!  
 To solve this, each node in the tree counts cycles by itself: each call to the "make more steps" method will increment it. The step uses that internal counter for the modulo operation. And then you will get "1 2 3 6", "1 2 4 6", "1 2 3 6", "1 2 5 6", etc.
 
 An example not using patterns, but just JSMini:
@@ -110,7 +110,7 @@ Routine({
         freq = str.notemidi.midicps;
 
         Routine({
-          s.bind { synth = Synth(\somedef, [\freq, freq]) };
+          s.bind { synth = Synth(\default, [\freq, freq]) };
           dur.wait;
           s.bind { synth.set(\gate, 0) };
         }).play;
