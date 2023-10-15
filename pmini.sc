@@ -236,7 +236,7 @@ JSNode {
 		cycle_number = cycle_number + 1;
 		
 		this.do_divide(cycle_number); // fill in dur values in the tree
-		
+
 		case
 		{ "[{".contains(str) and: (subgroup == ",") } {
 			var step, time, q = PriorityQueue.new;
@@ -302,7 +302,10 @@ JSNode {
 			} .flatten;
 		}
 
-		{ result = [ JSStep(1, 1, str, num) ] };
+		{
+			var trig = (degrade ? 1).coin.asInteger; // drop triggers
+			result = [ JSStep(trig, 1, str, num) ]
+		};
 
 		// apply slow
 		d = dur * ((slow ? "1").asFloat);
