@@ -601,7 +601,10 @@ JSMiniLexer {
 			{ ch == $. } {
 				if(val.isNil) { ^tokens.add(ch) } { val = val ++ ch };
 			}
-			{ ("[]{}()<>,%/*!|_~@?: ").contains(ch) } {
+			{ ch == $_ } {
+				if(val.isNil) { ^tokens.add(ch) } { val = val ++ ch };
+			}
+			{ ("[]{}()<>,%/*!|~@?: ").contains(ch) } {
 				val !? { tokens.add(val); val = nil; };
 				^tokens.add(ch);
 			}
