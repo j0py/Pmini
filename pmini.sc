@@ -304,6 +304,7 @@ JSNode {
 
 		{
 			var trig = (degrade ? 1).coin.asInteger; // drop triggers
+			if(str == "~") { trig = 0 }; // JST 2024-01-31
 			result = [ JSStep(trig, 1, str, num) ]
 		};
 
