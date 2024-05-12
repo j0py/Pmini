@@ -174,7 +174,7 @@ Routine({
 	patterns.do { |pattern|
 		pattern.quote.postln;
 		x = Pbindef(\pmini,
-			[\trig, \delta, \dur, \str, \num], Pmini("{1 2 1 2, 2 3 4}"),
+			[\trig, \delta, \dur, \str, \num], Pmini(pattern),
 			\degree, Pfunc({ |e|
 				if(e.trig <= 0) { \rest } { e.str.asInteger }
 			}),
