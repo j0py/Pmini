@@ -648,7 +648,7 @@ JSMNTokenizer {
 				{ part.notNil } { part = part ++ ch }
 				{ tokens.add(JSMNToken(ch.asString, reader.index)) }
 			}
-			{ "!@#$%^&*()+-={}[]:\"':;/?<>,|".contains(ch) }
+			{ "!@#$%^&*()+={}[]:\"':;/?<>,|".contains(ch) }
 			{
 				if(part.notNil) {
 					tokens.add(JSMNToken(part.asString, partindex));
