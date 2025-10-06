@@ -3,7 +3,7 @@ Takes a mini-notation string as input.
 Returns a pattern that can be used in a Pbind.
 The pattern has 5 values:
 
-\trig : 1 should trigger a note, 0 should not
+\coin : use with .coin function to determine if note should play
 \delta: how long to wait before processing the next step
 \dur  : value to calculate the sustain for a step
 \str  : string value for a step
@@ -11,8 +11,8 @@ The pattern has 5 values:
 
 Example:
 Pbind(
-    [\trig, \delta, \dur, \str, \num], Pmini("1 2 3 4"),
-	\degree, Pfunc({ |e| if(e.trig > 0) { e.str.asInteger } { \rest } }),
+    [\coin, \delta, \dur, \str, \num], Pmini("1 2 3 4"),
+	\degree, Pfunc({ |e| if(e.coin.coin) { e.str.asInteger } { \rest } }),
 )
 
 */
@@ -33,10 +33,10 @@ Pmb : Pbind {
 	*new { arg ... pairs;
 		pairs.asDict.at(\mini) !? { |pattern|
 			var pair = [
-				[\trig, \delta, \dur, \str, \num],
+				[\coin, \delta, \dur, \str, \num],
 				Pmini(pattern),
 				\degree, Pfunc({ |e|
-					if(e.trig <= 0) { \rest } { e.str.asFloat }
+					if(e.coin.coin) { e.str.asFloat } { \rest }
 				})
 			];
 			pairs = pair ++ pairs;
@@ -109,7 +109,7 @@ JSMN {
 		}
 	}
 
-	// return n cycles as arrays of [\trig, \delta, \str, \num] arrays
+	// return n cycles as arrays of [\coin, \delta, \str, \num] arrays
 	*steps { |str, n=1|
 		var root = JSMN.consume(str);
 		root
@@ -131,11 +131,25 @@ JSMN {
 }
 
 JSMNPattern {
-	var root;
+    var root;
 
-	*new { |str| ^super.newCopyArgs(JSMN.tree(str)) }
+    *new { |str| ^super.newCopyArgs(JSMN.tree(str)) }
 
-	steps {	^root.steps.collect({ |step| step.asArray }) }
+    steps {	
+        ^root.steps.collect({ |step| 
+            if(step.str[0] === $`) {
+                var expr = step.str.drop(1);
+                expr = expr.replace("tempo", TempoClock.tempo.asString);
+                //"expr % %".format(step.str, expr).postln;
+                try {
+                    step.str = expr.interpret.asString;
+                } { |err|
+                    err.errorString.postln;
+                }
+            };
+            step.asArray;
+        })
+    }
 }
 
 JSMNNode {
@@ -209,6 +223,9 @@ JSMNNode {
 	steps { |delta=1|
 		var d = delta / this.get($*, 1).asFloat * this.get($/, 1).asFloat;
 		var steps = List.new;
+        // JST 2025-06-27: $? means maybe play the step(s)
+        var degrade = (this.get($?, nil) ? 1).asFloat;
+
 		//"% steps (%)".format(value, this.class).postln;
 		while { delta >= 0.0001 } {
 			var stop = 10;
@@ -231,13 +248,13 @@ JSMNNode {
 				var short = queue.at(0).delta - delta;
 				steps.add(queue.at(0).copy.delta_(delta));
 				delta = 0;
-				// queue.at(0).delta_(short).trig_(0); JST 2025-05-24
-				queue.at(0).delta_(short).dur_(short).trig_(0);
+				queue.at(0).delta_(short).dur_(short).coin_(0);
 			};
 
             // JST 20250424
-            if(steps.last.str == "_") { steps.last.trig = 0 };
-            if(steps.last.str == "~") { steps.last.trig = 0 };
+            if(steps.last.str == "_") { steps.last.coin = 0 };
+            if(steps.last.str == "~") { steps.last.coin = 0 };
+            steps.last.coin_(steps.last.coin * degrade);
 		};
 
 		^steps;
@@ -417,7 +434,8 @@ JSMN.steps("{1 2 [3 4]}%5")
 		children.do { |child|
 			time = 0;
 			child.steps(delta).do { |step|
-				if(step.trig > 0) { queue2.put(time, step) };
+				//if(step.coin > 0) { queue2.put(time, step) };
+				queue2.put(time, step);
 				time = time + step.delta;
 			}
 		};
@@ -481,7 +499,8 @@ JSMN.steps("{1 2 [3 4]}%5")
 		weights.do { |weight, i|
 			var factor, index = indexes.at(i);
 			if(index != last_index) {
-				child_steps = children.at(index).steps(1);
+                var child = children.at(index);
+				child_steps = child.steps(1);
 				last_index = index;
 			};
 
@@ -572,26 +591,26 @@ JSMNModifier : JSMNNode {
 		{ token.isEuclidOpener } {
 			//"% inmod iseu %".format(value, token).postln;
 			^this.parent.consume(token)
-			//^this.add(JSMNEuclid(token))
 		}
 		{ token.isGroupOpener } { ^this.add(JSMNGroup(token)) }
 		{ ^this.parent.consume(token) }
 	}
 
-	fill { |delta| queue.addAll(children.at(0).steps(delta)) }
+    fill { |delta| 
+        if(children.at(0).isNil) {
+            queue.add(JSMNStep(1, delta, "0.5")); // occurs with $?
+        } {
+            queue.addAll(children.at(0).steps(delta));
+        }
+    }
 }
 
 JSMNData : JSMNNode {
-	consume { |token| ^this.parent.consume(token) }
+    consume { |token| ^this.parent.consume(token) }
 
-	fill { |delta|
-    // JST 2025-04-02:
-    // if the $<hex> modifier was used, then you can create
-    // multiple steps at this point and add them to the
-    // queue (with smaller delta values that addup to the
-    // original delta of course).
-    queue.add(JSMNStep(1, delta, value, this.get($:, nil)));
-  }
+    fill { |delta|
+        queue.add(JSMNStep(1, delta, value, this.get($:, nil)));
+    }
 }
 
 JSMNSeparator : JSMNNode {
@@ -599,17 +618,21 @@ JSMNSeparator : JSMNNode {
 }
 
 JSMNStep {
-	var <>trig, <>delta, <>str, <>num, <>dur;
+	var <>coin, <>delta, <>str, <>num, <>dur;
 
-	*new { |trig, delta, str, num|
-		^super.newCopyArgs(trig, delta, str, num, delta)
+	*new { |coin, delta, str, num|
+		^super.newCopyArgs(coin, delta, str, num, delta)
 	}
 
-	asArray { ^[ trig, delta, dur, str, num] }
+	asArray { ^[ coin, delta, dur, str, num] }
 	
 	printOn { |stream|
 		stream << "Step (%, %, %, %, %)".format(
-			trig, delta.round(0.01), dur.round(0.01), str, num
+			coin.round(0.01), 
+            delta.round(0.01), 
+            dur.round(0.01), 
+            str, 
+            num
 		);
 	}
 }
@@ -637,7 +660,7 @@ JSMNReader {
 	
 JSMNTokenizer {
 	*parse { |reader|
-		var ch, tokens=List.new, part, partindex;
+		var ch, tokens=List.new, part, partindex, inExpression=false;
 
 		while { (ch = reader.next).notNil } {
 			case
@@ -645,6 +668,7 @@ JSMNTokenizer {
 			{
 				part !? { tokens.add(JSMNToken(part, partindex)) };
 				part = nil;
+                inExpression = false;
 
 				// detect the Marking your feet (" . ") separator
 				if((reader.peek(1) === $.) and: (reader.peek(2) === $ )) {
@@ -655,13 +679,28 @@ JSMNTokenizer {
 					tokens.add(JSMNToken(ch, reader.index));
 				}
 			}
+            // ` starts an expression, which ends at the first space char
+            // or another ` character
+            { "`".contains(ch) } {
+                if(inExpression) {
+                    part !? { tokens.add(JSMNToken(part, partindex)) };
+                    part = nil;
+                    inExpression = false;
+                } {
+                    part !? { tokens.add(JSMNToken(part, partindex)) };
+                    part = "`";
+                    inExpression = true;
+                }
+            }
+            { inExpression }
+            { part = part ++ ch }
+            //
 			{ "~_".contains(ch) }
 			{
 				case
 				{ part.notNil } { part = part ++ ch }
 				{ tokens.add(JSMNToken(ch.asString, reader.index)) }
 			}
-			//{ "!@#$%^&*()+{}[]:\"':;/?<>,|".contains(ch) }
 			{ "!@%^&*()+{}[]:\"':/?<>,|".contains(ch) }
 			{
 				if(part.notNil) {
