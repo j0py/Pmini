@@ -102,6 +102,7 @@ JSMN {
 		try {
 			^JSMN.consume(str)
 			.attachModifiers
+            .doRepeats
 			.detectSubsequences;
 			//.log;
 		} { |err|
@@ -114,6 +115,7 @@ JSMN {
 		var root = JSMN.consume(str);
 		root
 		.attachModifiers
+        .doRepeats
 		.detectSubsequences
 		.log;
 		n.do { |i|
@@ -133,7 +135,9 @@ JSMN {
 JSMNPattern {
     var root;
 
-    *new { |str| ^super.newCopyArgs(JSMN.tree(str)) }
+    *new { |str| 
+        ^super.newCopyArgs(JSMN.tree(str));
+    }
 
     steps {	
         ^root.steps.collect({ |step| 
@@ -190,6 +194,25 @@ JSMNNode {
 		children = newchildren;
 	}
 
+    doRepeats {
+        var newchildren = List.new;
+
+        children.do { |child|
+            child.doRepeats; // first go deep
+
+            // repeat where necessary
+            child.get($!, 1).asInteger.do { |i|
+                if(i <= 0) {
+                    newchildren.add(child) // the first one is cheap
+                } {
+                    newchildren.add(child.deepCopy) // more expensive
+                }
+            }
+        };
+
+        children = newchildren;
+    }
+
 	detectSubsequences {
 		euclid !? { euclid.detectSubsequences };
 		children.do { |child| child.detectSubsequences };
@@ -225,6 +248,7 @@ JSMNNode {
 		var steps = List.new;
         // JST 2025-06-27: $? means maybe play the step(s)
         var degrade = (this.get($?, nil) ? 1).asFloat;
+        var org_delta = delta;
 
 		//"% steps (%)".format(value, this.class).postln;
 		while { delta >= 0.0001 } {
@@ -254,8 +278,19 @@ JSMNNode {
             // JST 20250424
             if(steps.last.str == "_") { steps.last.coin = 0 };
             if(steps.last.str == "~") { steps.last.coin = 0 };
-            steps.last.coin_(steps.last.coin * degrade);
+
+            // JST 2025-10-31: do not degrade your children
+            // steps.last.coin_(steps.last.coin * degrade);
 		};
+
+        // JST 2025-10-31: become a Rest step if needed
+        // but do throw away what you just generated so that
+        // rhythmic sequences continue!
+        if(degrade.coin.not) {
+            steps = List.new;
+            steps.add(JSMNStep(0, org_delta, "~", nil));
+            ^steps;
+        };
 
 		^steps;
 	}
@@ -279,7 +314,8 @@ JSMNNode {
 JSMNTurn : JSMNGroup {
 	var turn;
 	
-	fill { |delta|
+    // doRepeats changes the tree, which eventually is better
+	depr_fill { |delta|
 		var indexes = List.new;
 
 		turn = (turn ? -1) + 1;
@@ -290,6 +326,11 @@ JSMNTurn : JSMNGroup {
 
 		queue.addAll(children.at(indexes.wrapAt(turn)).steps(delta));
 	}
+
+    fill { |delta|
+		turn = (turn ? -1) + 1;
+        queue.addAll(children.wrapAt(turn).steps(delta));
+    }
 }
 
 /*
@@ -462,7 +503,8 @@ JSMN.steps("{1 2 [3 4]}%5")
 		};
 	}
 	
-	fill_normal { |delta|
+    // doRepeat makes this one deprercated
+	depr_fill_normal { |delta|
 		var indexes = List.new;
 		var weights = List.new;
 		var sum, child_steps, last_index;
@@ -495,23 +537,49 @@ JSMN.steps("{1 2 [3 4]}%5")
 
 		sum = weights.sum;
 
-		last_index = -1;
 		weights.do { |weight, i|
-			var factor, index = indexes.at(i);
-			if(index != last_index) {
-                var child = children.at(index);
-				child_steps = child.steps(1);
-				last_index = index;
-			};
-
 			if(weight > 0.0001) {
-				factor = delta * weight / sum;
+				var factor = delta * weight / sum;
 				queue.addAll(
-					child_steps.deepCopy.collect { |step|
+                    children.at(indexes.at(i)).steps(1).collect { |step|
 						step.delta_(step.delta * factor);
 						step.dur_(step.dur * factor);
 					}
 				)
+			}
+		}
+	}
+
+	fill_normal { |delta|
+		var weights = List.new;
+		var sum, child_steps, last_index;
+
+		children.do { |ch, i| weights.add(ch.get($@, 1).asFloat) };
+
+		// hmmmm..
+		if((value == "root") and: (weights.size > 1)) {
+			// transfer weights between children
+			for(weights.size - 1, 1) { |i|
+				var child = children.at(i);
+				
+				if(child.value == "_") {
+					weights.put(i - 1, weights.at(i - 1) + weights.at(i));
+					weights.put(i, 0);
+				}
+			};
+		};
+
+		sum = weights.sum;
+
+		weights.do { |weight, i|
+			if(weight > 0.0001) {
+				var factor = delta * weight / sum;
+				queue.addAll(
+                    children.at(i).steps(1).collect { |step|
+						step.delta_(step.delta * factor);
+						step.dur_(step.dur * factor);
+					}
+				);
 			}
 		}
 	}
@@ -703,12 +771,13 @@ JSMNTokenizer {
 			}
 			{ "!@%^&*()+{}[]:\"':/?<>,|".contains(ch) }
 			{
-				if(part.notNil) {
+                part !? { 
 					tokens.add(JSMNToken(part.asString, partindex));
-					part = nil;
-				};
-				
-				tokens.add(JSMNToken(ch, reader.index));
+                };
+
+				tokens.add(JSMNToken(ch, reader.index, part.isNil));
+
+                part = nil;
 			} {
 				part ?? { partindex = reader.index;	part = "" };
 				part = part ++ ch;
@@ -724,12 +793,20 @@ JSMNToken {
 	var <>value, <>index, <>isModifier, <>isGroupOpener, <>isGroupCloser,
 	<>isString, <>isSeparator, <>isTurnOpener, <>isEuclidOpener;
 	
-	*new { |value, index|
+	*new { |value, index, firstCharAfterASpace|
 		var instance = super.newCopyArgs(value, index);
-		instance.isModifier_("/*@%:?!".contains(value)); // maybe add $
+		instance.isModifier_("/*@%:?!".contains(value));
 		instance.isTurnOpener_("<".contains(value));
-		instance.isEuclidOpener_("(".contains(value));
-		instance.isGroupOpener_("[{".contains(value));
+
+        // to make possible that "(" is a group opener
+        if(firstCharAfterASpace ? false) {
+            instance.isEuclidOpener_(false);
+            instance.isGroupOpener_("[{(".contains(value));
+        } {
+            instance.isEuclidOpener_("(".contains(value));
+            instance.isGroupOpener_("[{".contains(value));
+        };
+
 		instance.isGroupCloser_("]>})".contains(value));
 		instance.isSeparator_("|,".contains(value) or: (" . " == value));
 		instance.isString_(value.isString);
